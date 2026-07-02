@@ -1,0 +1,18 @@
+{
+  "payment-api": [
+    {
+      "version": "v2.8.1",
+      "operator": "alice",
+      "deployed_at": "10:03",
+      "summary": "调整数据库连接池配置和支付创建逻辑。"
+    }
+  ],
+  "order-api": [
+    {
+      "version": "v1.9.4",
+      "operator": "bob",
+      "deployed_at": "09:10",
+      "summary": "常规订单查询优化。"
+    }
+  ]
+}

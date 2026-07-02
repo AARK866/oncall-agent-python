@@ -1,0 +1,26 @@
+{
+  "payment-api": [
+    {
+      "timestamp": "10:05:13",
+      "level": "ERROR",
+      "message": "DBConnectionTimeout: failed to borrow connection from pool after 3000ms"
+    },
+    {
+      "timestamp": "10:05:48",
+      "level": "ERROR",
+      "message": "PaymentCreateException: database connection pool exhausted"
+    },
+    {
+      "timestamp": "10:06:02",
+      "level": "WARN",
+      "message": "Retry payment request due to downstream timeout"
+    }
+  ],
+  "order-api": [
+    {
+      "timestamp": "10:06:12",
+      "level": "INFO",
+      "message": "Order status update completed"
+    }
+  ]
+}

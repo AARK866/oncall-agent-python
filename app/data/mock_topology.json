@@ -1,0 +1,18 @@
+{
+  "payment-api": {
+    "upstreams": ["checkout-web", "order-api"],
+    "downstreams": ["mysql-payment", "risk-api", "account-api"],
+    "related_alerts": [
+      {
+        "service": "mysql-payment",
+        "severity": "warning",
+        "title": "数据库连接数接近上限"
+      }
+    ]
+  },
+  "order-api": {
+    "upstreams": ["checkout-web"],
+    "downstreams": ["mysql-order", "payment-api"],
+    "related_alerts": []
+  }
+}

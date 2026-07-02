@@ -1,0 +1,22 @@
+{
+  "payment-api": {
+    "service": "payment-api",
+    "window": "30m",
+    "http_5xx_rate": "8.7%",
+    "p95_latency_ms": 1280,
+    "cpu_usage": "68%",
+    "memory_usage": "74%",
+    "started_at": "10:05",
+    "summary": "10:05 后 5xx 错误率从 0.2% 升至 8.7%，P95 延迟同步升高。"
+  },
+  "order-api": {
+    "service": "order-api",
+    "window": "30m",
+    "http_5xx_rate": "0.4%",
+    "p95_latency_ms": 260,
+    "cpu_usage": "41%",
+    "memory_usage": "58%",
+    "started_at": "normal",
+    "summary": "order-api 指标整体稳定，未发现明显异常。"
+  }
+}
