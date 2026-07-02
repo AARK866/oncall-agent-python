@@ -1,4 +1,5 @@
 from app.agents.knowledge_agent import KnowledgeAgent
+from app.agents.ops_agent import OpsAgent
 from app.llm import LLMClient, MockLLMClient
 from app.memory import InMemoryConversationMemory
 from app.schemas import ChatMode, ChatRequest, ChatResponse
@@ -10,10 +11,12 @@ class ConversationAgent:
     def __init__(
         self,
         knowledge_agent: KnowledgeAgent,
+        ops_agent: OpsAgent | None = None,
         memory: InMemoryConversationMemory | None = None,
         llm: LLMClient | None = None,
     ) -> None:
         self.knowledge_agent = knowledge_agent
+        self.ops_agent = ops_agent or OpsAgent.create_default()
         self.memory = memory or InMemoryConversationMemory()
         self.llm = llm or MockLLMClient()
 
@@ -31,7 +34,10 @@ class ConversationAgent:
                 session_id=request.session_id,
             )
         elif mode == ChatMode.ops:
-            response = self._ops_placeholder_response(request)
+            response = await self.ops_agent.analyze(
+                question=request.message,
+                session_id=request.session_id,
+            )
         else:
             response = await self._general_response(request)
 
@@ -58,20 +64,6 @@ class ConversationAgent:
             answer=answer,
             mode=ChatMode.auto,
             metadata={"routed_to": "mock_llm"},
-        )
-
-    def _ops_placeholder_response(self, request: ChatRequest) -> ChatResponse:
-        return ChatResponse(
-            session_id=request.session_id,
-            answer=(
-                "已识别为运维排障问题。下一步接入 OpsAgent 后，我会自动查询指标、日志、"
-                "发布记录和服务拓扑，并汇总根因分析。"
-            ),
-            mode=ChatMode.ops,
-            metadata={
-                "routed_to": "ops_agent",
-                "status": "pending_implementation",
-            },
         )
 
     def _contains_any(self, text: str, keywords: set[str]) -> bool:
