@@ -153,3 +153,8 @@ class DiagnosisRecord(BaseModel):
     plan_trace: PlanTrace | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class IncidentDetailResponse(BaseModel):
+    incident: IncidentRecord
+    latest_diagnosis: DiagnosisRecord | None = None
