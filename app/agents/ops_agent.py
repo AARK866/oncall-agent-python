@@ -1,4 +1,5 @@
 from app.agents.knowledge_agent import KnowledgeAgent
+from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
 from app.schemas import ChatMode, ChatResponse, DiagnosisReport, ToolResult
 from app.tools import ToolRegistry, create_mock_ops_registry
@@ -15,6 +16,7 @@ class OpsAgent:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
         self.react_loop = ReactLoop(tool_registry=tool_registry)
+        self.plan_execute = PlanExecuteReplan(tool_registry=tool_registry)
 
     @classmethod
     def create_default(cls) -> "OpsAgent":
@@ -30,6 +32,7 @@ class OpsAgent:
         service: str | None = None,
     ) -> ChatResponse:
         target_service = service or self._infer_service(question)
+        plan_trace = await self.plan_execute.run(service=target_service)
         react_steps = await self.react_loop.run(question=question, service=target_service)
         tool_results = [
             step.observation
@@ -56,6 +59,7 @@ class OpsAgent:
                 "service": target_service,
                 "tool_results": [result.model_dump() for result in tool_results],
                 "react_steps": [step.model_dump() for step in react_steps],
+                "plan_trace": plan_trace.model_dump(),
                 "runbook_retrieved_count": knowledge_response.metadata.get("retrieved_count", 0),
             },
         )

@@ -95,6 +95,19 @@ class ReactStep(BaseModel):
     observation: ToolResult | None = None
 
 
+class PlanStep(BaseModel):
+    step_id: str
+    goal: str
+    tool_call: ToolCall | None = None
+    status: str = "pending"
+    observation: ToolResult | None = None
+
+
+class PlanTrace(BaseModel):
+    plan: list[PlanStep] = Field(default_factory=list)
+    replan_notes: list[str] = Field(default_factory=list)
+
+
 class AgentEvent(BaseModel):
     event: AgentEventType
     data: dict[str, Any] = Field(default_factory=dict)
