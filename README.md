@@ -1,3 +1,17 @@
 # OnCall Agent Python
 
-这是一个用于学习智能 OnCall Agent 的 Python 项目。
+A learning-oriented OnCall Agent backend built with Python and FastAPI.
+
+Useful commands:
+
+```powershell
+python -m uvicorn app.main:app --reload
+python scripts/check_llm_client.py
+.\.venv\Scripts\python.exe -m pytest
+```
+
+Docs:
+
+- Architecture: `docs/architecture.md`
+- Integration roadmap: `docs/integration-roadmap.md`
+- LLM setup: `docs/llm-setup.md`
