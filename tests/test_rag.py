@@ -1,4 +1,4 @@
-from app.rag import KnowledgeBase, LocalKnowledgeBase
+from app.rag import HashEmbeddingModel, InMemoryVectorStore, KnowledgeBase, LocalKnowledgeBase
 
 
 def test_local_knowledge_base_searches_runbook() -> None:
@@ -30,3 +30,40 @@ def test_knowledge_base_can_search_another_runbook() -> None:
 
     assert results
     assert results[0].title == "Order API Timeout Runbook"
+
+
+def test_vector_knowledge_base_searches_runbook() -> None:
+    kb = KnowledgeBase.from_directory("app/data/runbooks", retriever_mode="vector")
+
+    results = kb.search("database connection pool exhausted", service="payment-api", top_k=1)
+
+    assert results
+    assert results[0].metadata["retriever"] == "vector"
+    assert results[0].metadata["services"] == ["payment-api"]
+    assert kb.stats()["retriever_mode"] == "vector"
+
+
+def test_hybrid_knowledge_base_merges_keyword_and_vector_results() -> None:
+    kb = KnowledgeBase.from_directory("app/data/runbooks", retriever_mode="hybrid")
+
+    results = kb.search("payment 5xx database", service="payment-api", top_k=2)
+
+    assert results
+    assert results[0].metadata["retriever"] in {"hybrid", "keyword", "vector"}
+
+
+def test_hash_embedding_model_is_deterministic() -> None:
+    model = HashEmbeddingModel(dimensions=16)
+
+    assert model.embed("payment 5xx") == model.embed("payment 5xx")
+    assert len(model.embed("payment 5xx")) == 16
+
+
+def test_in_memory_vector_store_can_filter_metadata() -> None:
+    kb = KnowledgeBase.from_directory("app/data/runbooks")
+    store = InMemoryVectorStore.from_chunks(kb.chunks)
+
+    results = store.search("timeout latency", metadata_filter={"services": "order-api"}, top_k=1)
+
+    assert results
+    assert results[0].metadata["services"] == ["order-api"]

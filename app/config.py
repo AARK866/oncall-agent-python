@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     incident_db_path: str = "app/data/oncall_agent.db"
     ops_tool_mode: str = "mock"
     ops_graph_runtime: str = "local"
+    knowledge_retriever_mode: str = "keyword"
 
     model_config = SettingsConfigDict(
         env_file=".env",

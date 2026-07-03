@@ -16,3 +16,4 @@ Docs:
 - Integration roadmap: `docs/integration-roadmap.md`
 - LLM setup: `docs/llm-setup.md`
 - LangGraph setup: `docs/langgraph-setup.md`
+- Vector store setup: `docs/vector-store.md`
