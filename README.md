@@ -14,6 +14,7 @@ Docs:
 
 - Architecture: `docs/architecture.md`
 - Integration roadmap: `docs/integration-roadmap.md`
+- Enterprise env: `docs/enterprise-env.md`
 - LLM setup: `docs/llm-setup.md`
 - LangChain real LLM: `docs/langchain-real-llm.md`
 - LangGraph setup: `docs/langgraph-setup.md`

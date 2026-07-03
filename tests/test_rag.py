@@ -1,4 +1,15 @@
-from app.rag import HashEmbeddingModel, InMemoryVectorStore, KnowledgeBase, LocalKnowledgeBase
+import pytest
+
+from app.config import settings
+from app.rag import (
+    HashEmbeddingModel,
+    InMemoryVectorStore,
+    KnowledgeBase,
+    LangChainEmbeddingModel,
+    LocalKnowledgeBase,
+    MilvusVectorStore,
+    create_embedding_model,
+)
 
 
 def test_local_knowledge_base_searches_runbook() -> None:
@@ -59,6 +70,26 @@ def test_hash_embedding_model_is_deterministic() -> None:
     assert len(model.embed("payment 5xx")) == 16
 
 
+def test_create_embedding_model_defaults_to_hash(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "embedding_provider", "hash")
+    monkeypatch.setattr(settings, "embedding_dimensions", 16)
+
+    model = create_embedding_model()
+
+    assert isinstance(model, HashEmbeddingModel)
+    assert len(model.embed("payment")) == 16
+
+
+def test_langchain_embedding_model_normalizes_base_url() -> None:
+    model = LangChainEmbeddingModel(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.com/v1/",
+    )
+
+    assert model.base_url == "https://example.com/v1"
+
+
 def test_in_memory_vector_store_can_filter_metadata() -> None:
     kb = KnowledgeBase.from_directory("app/data/runbooks")
     store = InMemoryVectorStore.from_chunks(kb.chunks)
@@ -67,3 +98,17 @@ def test_in_memory_vector_store_can_filter_metadata() -> None:
 
     assert results
     assert results[0].metadata["services"] == ["order-api"]
+
+
+def test_keyword_mode_does_not_initialize_milvus(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "knowledge_vector_store", "milvus")
+
+    kb = KnowledgeBase.from_directory("app/data/runbooks", retriever_mode="keyword")
+    results = kb.search("payment 5xx", top_k=1)
+
+    assert results
+
+
+def test_milvus_store_requires_uri() -> None:
+    with pytest.raises(ValueError, match="MILVUS_URI"):
+        MilvusVectorStore(embedding_model=HashEmbeddingModel(), uri="", client=None)

@@ -3,6 +3,8 @@ from typing import Any
 
 from app.config import settings
 from app.rag.document_loader import RawDocument, load_markdown_documents
+from app.rag.embeddings import create_embedding_model
+from app.rag.milvus_store import MilvusVectorStore
 from app.rag.retriever import LocalKnowledgeBase
 from app.rag.splitter import DocumentChunk, split_documents
 from app.rag.vector_store import InMemoryVectorStore
@@ -36,7 +38,7 @@ class KnowledgeBase:
         self.retriever_mode = retriever_mode
         self._documents_by_id = {document.doc_id: document for document in documents}
         self._keyword_retriever = LocalKnowledgeBase(chunks=chunks)
-        self._vector_store = InMemoryVectorStore.from_chunks(chunks=chunks)
+        self._vector_store: Any | None = None
 
     @classmethod
     def from_directory(
@@ -100,7 +102,9 @@ class KnowledgeBase:
             "document_count": len(self.documents),
             "chunk_count": len(self.chunks),
             "retriever_mode": self.retriever_mode,
-            "vector_store": "in_memory",
+            "vector_store": settings.knowledge_vector_store,
+            "embedding_provider": settings.embedding_provider,
+            "embedding_model": settings.embedding_model,
             "services": _collect_metadata_values(self.documents, "services"),
             "incident_types": _collect_metadata_values(self.documents, "incident_types"),
         }
@@ -124,11 +128,33 @@ class KnowledgeBase:
         top_k: int,
         metadata_filter: dict[str, Any] | None,
     ) -> list[SourceDocument]:
-        return self._vector_store.search(
+        return self._get_vector_store().search(
             query=query,
             top_k=top_k,
             metadata_filter=metadata_filter,
         )
+
+    def _get_vector_store(self):
+        if self._vector_store is not None:
+            return self._vector_store
+
+        embedding_model = create_embedding_model()
+        store_mode = settings.knowledge_vector_store.lower().strip()
+        if store_mode in {"in_memory", "memory", "local"}:
+            self._vector_store = InMemoryVectorStore.from_chunks(
+                chunks=self.chunks,
+                embedding_model=embedding_model,
+            )
+            return self._vector_store
+
+        if store_mode == "milvus":
+            self._vector_store = MilvusVectorStore.from_chunks(
+                chunks=self.chunks,
+                embedding_model=embedding_model,
+            )
+            return self._vector_store
+
+        raise ValueError(f"Unsupported KNOWLEDGE_VECTOR_STORE: {settings.knowledge_vector_store}")
 
     def _hybrid_search(
         self,

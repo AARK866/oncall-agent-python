@@ -20,6 +20,7 @@ Edit `.env`:
 
 ```env
 KNOWLEDGE_RETRIEVER_MODE=vector
+KNOWLEDGE_VECTOR_STORE=in_memory
 ```
 
 Then run:
@@ -52,11 +53,29 @@ KNOWLEDGE_RETRIEVER_MODE=hybrid
 
 Hybrid mode is useful when exact keywords and semantic similarity should both influence ranking.
 
-## 4. Future Milvus Replacement
+## 4. Milvus Vector Store
 
-The current vector store is `InMemoryVectorStore`, which is intentionally simple.
+The current vector store can be either:
 
-Later, `MilvusVectorStore` can replace it behind the same search interface:
+- `in_memory`: simple local vector store.
+- `milvus`: production vector database through `MilvusVectorStore`.
+
+Use Milvus after a real embedding service is configured:
+
+```env
+EMBEDDING_PROVIDER=langchain-openai
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_API_KEY=your_embedding_api_key
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_DIMENSIONS=1536
+
+KNOWLEDGE_RETRIEVER_MODE=hybrid
+KNOWLEDGE_VECTOR_STORE=milvus
+MILVUS_URI=http://127.0.0.1:19530
+MILVUS_COLLECTION_NAME=oncall_runbook_chunks
+```
+
+The retrieval flow stays stable:
 
 ```text
 query -> embedding -> vector store search -> SourceDocument[]
