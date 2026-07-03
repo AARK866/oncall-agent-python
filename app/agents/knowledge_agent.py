@@ -2,14 +2,14 @@ from pathlib import Path
 from typing import Sequence
 
 from app.llm import LLMClient, create_llm_client
-from app.rag import LocalKnowledgeBase
+from app.rag import KnowledgeBase
 from app.schemas import ChatMessage, ChatMode, ChatResponse, MessageRole, SourceDocument
 
 
 class KnowledgeAgent:
     """Agent that answers questions with local knowledge-base context."""
 
-    def __init__(self, knowledge_base: LocalKnowledgeBase, llm: LLMClient | None = None) -> None:
+    def __init__(self, knowledge_base: KnowledgeBase, llm: LLMClient | None = None) -> None:
         self.knowledge_base = knowledge_base
         self.llm = llm or create_llm_client()
 
@@ -20,7 +20,7 @@ class KnowledgeAgent:
         llm: LLMClient | None = None,
     ) -> "KnowledgeAgent":
         return cls(
-            knowledge_base=LocalKnowledgeBase.from_directory(directory),
+            knowledge_base=KnowledgeBase.from_directory(directory),
             llm=llm,
         )
 
@@ -29,15 +29,24 @@ class KnowledgeAgent:
         question: str,
         session_id: str = "default",
         top_k: int = 3,
+        service: str | None = None,
+        incident_type: str | None = None,
+        keywords: list[str] | None = None,
     ) -> ChatResponse:
-        sources = self.search(question=question, top_k=top_k)
+        sources = self.search(
+            question=question,
+            top_k=top_k,
+            service=service,
+            incident_type=incident_type,
+            keywords=keywords,
+        )
         if not sources:
             return ChatResponse(
                 session_id=session_id,
                 answer="知识库中暂未找到相关内容。请补充服务名、告警现象或时间范围后再试。",
                 mode=ChatMode.knowledge,
                 sources=[],
-                metadata={"retrieved_count": 0},
+                metadata={"retrieved_count": 0, "knowledge_base": self.knowledge_base.stats()},
             )
 
         messages = self._build_messages(question=question, sources=sources)
@@ -49,11 +58,24 @@ class KnowledgeAgent:
             answer=answer,
             mode=ChatMode.knowledge,
             sources=sources,
-            metadata={"retrieved_count": len(sources)},
+            metadata={"retrieved_count": len(sources), "knowledge_base": self.knowledge_base.stats()},
         )
 
-    def search(self, question: str, top_k: int = 3) -> list[SourceDocument]:
-        return self.knowledge_base.search(query=question, top_k=top_k)
+    def search(
+        self,
+        question: str,
+        top_k: int = 3,
+        service: str | None = None,
+        incident_type: str | None = None,
+        keywords: list[str] | None = None,
+    ) -> list[SourceDocument]:
+        return self.knowledge_base.search(
+            query=question,
+            top_k=top_k,
+            service=service,
+            incident_type=incident_type,
+            keywords=keywords,
+        )
 
     def _build_messages(self, question: str, sources: Sequence[SourceDocument]) -> list[ChatMessage]:
         context = "\n\n".join(

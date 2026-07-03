@@ -43,6 +43,8 @@ class OpsAgent:
             question=question,
             session_id=session_id,
             top_k=2,
+            service=target_service,
+            incident_type="5xx" if "5xx" in question.lower() else None,
         )
         report = self._build_report(
             service=target_service,
