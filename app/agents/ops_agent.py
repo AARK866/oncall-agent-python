@@ -1,5 +1,6 @@
 from app.agents.knowledge_agent import KnowledgeAgent
-from app.schemas import ChatMode, ChatResponse, DiagnosisReport, ToolCall, ToolResult
+from app.agents.react_loop import ReactLoop
+from app.schemas import ChatMode, ChatResponse, DiagnosisReport, ToolResult
 from app.tools import ToolRegistry, create_mock_ops_registry
 
 
@@ -13,6 +14,7 @@ class OpsAgent:
     ) -> None:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
+        self.react_loop = ReactLoop(tool_registry=tool_registry)
 
     @classmethod
     def create_default(cls) -> "OpsAgent":
@@ -28,7 +30,12 @@ class OpsAgent:
         service: str | None = None,
     ) -> ChatResponse:
         target_service = service or self._infer_service(question)
-        tool_results = await self._run_investigation(target_service)
+        react_steps = await self.react_loop.run(question=question, service=target_service)
+        tool_results = [
+            step.observation
+            for step in react_steps
+            if step.observation is not None
+        ]
         knowledge_response = await self.knowledge_agent.answer(
             question=question,
             session_id=session_id,
@@ -48,18 +55,10 @@ class OpsAgent:
             metadata={
                 "service": target_service,
                 "tool_results": [result.model_dump() for result in tool_results],
+                "react_steps": [step.model_dump() for step in react_steps],
                 "runbook_retrieved_count": knowledge_response.metadata.get("retrieved_count", 0),
             },
         )
-
-    async def _run_investigation(self, service: str) -> list[ToolResult]:
-        calls = [
-            ToolCall(name="query_metrics", arguments={"service": service, "window": "30m"}),
-            ToolCall(name="query_logs", arguments={"service": service, "window": "30m"}),
-            ToolCall(name="query_deployments", arguments={"service": service, "window": "1h"}),
-            ToolCall(name="query_service_topology", arguments={"service": service}),
-        ]
-        return [await self.tool_registry.execute(call) for call in calls]
 
     def _infer_service(self, question: str) -> str:
         normalized = question.lower()

@@ -89,6 +89,12 @@ class ToolResult(BaseModel):
     elapsed_ms: int | None = None
 
 
+class ReactStep(BaseModel):
+    thought: str
+    action: ToolCall | None = None
+    observation: ToolResult | None = None
+
+
 class AgentEvent(BaseModel):
     event: AgentEventType
     data: dict[str, Any] = Field(default_factory=dict)
