@@ -5,7 +5,9 @@ from app.tools.base import BaseTool
 
 
 class ToolRegistry:
-    def __init__(self) -> None:
+    def __init__(self, connector_name: str = "manual", mode: str = "manual") -> None:
+        self.connector_name = connector_name
+        self.mode = mode
         self._tools: dict[str, BaseTool] = {}
 
     def register(self, tool: BaseTool) -> None:
@@ -24,6 +26,13 @@ class ToolRegistry:
 
     def tool_schemas(self) -> list[dict]:
         return [self._tools[name].to_schema() for name in self.list_tools()]
+
+    def describe(self) -> dict[str, object]:
+        return {
+            "connector_name": self.connector_name,
+            "mode": self.mode,
+            "tools": self.tool_schemas(),
+        }
 
     async def execute(self, tool_call: ToolCall) -> ToolResult:
         tool = self.get(tool_call.name)

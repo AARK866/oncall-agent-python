@@ -3,7 +3,7 @@ from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
 from app.schemas import ChatMode, ChatResponse, DiagnosisReport, ToolResult
 from app.storage import SQLiteIncidentStore
-from app.tools import ToolRegistry, create_mock_ops_registry
+from app.tools import ToolRegistry, create_ops_tool_registry
 
 
 class OpsAgent:
@@ -24,7 +24,7 @@ class OpsAgent:
     @classmethod
     def create_default(cls, incident_store: SQLiteIncidentStore | None = None) -> "OpsAgent":
         return cls(
-            tool_registry=create_mock_ops_registry(),
+            tool_registry=create_ops_tool_registry(),
             knowledge_agent=KnowledgeAgent.from_runbook_directory(),
             incident_store=incident_store or SQLiteIncidentStore.from_settings(),
         )
@@ -67,6 +67,7 @@ class OpsAgent:
                 "react_steps": [step.model_dump() for step in react_steps],
                 "plan_trace": plan_trace.model_dump(),
                 "runbook_retrieved_count": knowledge_response.metadata.get("retrieved_count", 0),
+                "tool_connector": self.tool_registry.describe(),
             },
         )
         self._persist_analysis(

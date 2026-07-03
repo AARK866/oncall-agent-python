@@ -9,7 +9,7 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
 def create_mock_ops_registry() -> ToolRegistry:
-    registry = ToolRegistry()
+    registry = ToolRegistry(connector_name="mock_ops", mode="mock")
     for tool in create_mock_ops_tools():
         registry.register(tool)
     return registry
