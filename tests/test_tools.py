@@ -2,6 +2,7 @@ import asyncio
 
 from app.schemas import ToolCall
 from app.tools import ToolRegistry, create_mock_ops_registry, create_ops_connector, create_ops_tool_registry
+from app.tools.real_ops_tools import create_real_ops_tools
 
 
 def test_mock_ops_registry_executes_metrics_tool() -> None:
@@ -48,3 +49,37 @@ def test_manual_tool_registry_keeps_default_metadata() -> None:
 
     assert registry.describe()["connector_name"] == "manual"
     assert registry.describe()["mode"] == "manual"
+
+
+def test_real_ops_connector_registers_expected_tools() -> None:
+    registry = create_ops_tool_registry(mode="real")
+
+    assert registry.mode == "real"
+    assert registry.connector_name == "real_ops"
+    assert registry.list_tools() == [
+        "query_deployments",
+        "query_logs",
+        "query_metrics",
+        "query_service_topology",
+    ]
+
+
+def test_real_ops_tool_reports_missing_prometheus_config() -> None:
+    registry = create_ops_tool_registry(mode="real")
+
+    result = asyncio.run(
+        registry.execute(ToolCall(name="query_metrics", arguments={"service": "payment-api"}))
+    )
+
+    assert result.success is False
+    assert "PROMETHEUS_BASE_URL" in str(result.error)
+
+
+def test_real_topology_placeholder_is_available() -> None:
+    tool_map = {tool.name: tool for tool in create_real_ops_tools()}
+
+    result = asyncio.run(tool_map["query_service_topology"].run({"service": "payment-api"}))
+
+    assert result["service"] == "payment-api"
+    assert result["dependencies"] == []
+    assert result["related_alerts"] == []

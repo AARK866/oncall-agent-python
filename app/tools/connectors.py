@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 from app.tools.base import BaseTool
 from app.tools.mock_ops_tools import create_mock_ops_tools
+from app.tools.real_ops_tools import create_real_ops_tools
 from app.tools.registry import ToolRegistry
 
 
@@ -35,7 +36,4 @@ class RealOpsConnector(OpsToolConnector):
     name = "real_ops"
 
     def tools(self) -> list[BaseTool]:
-        raise NotImplementedError(
-            "Real ops connector is not implemented yet. "
-            "Use OPS_TOOL_MODE=mock until Prometheus/Loki/GitLab clients are configured."
-        )
+        return create_real_ops_tools()

@@ -18,3 +18,4 @@ Docs:
 - LangGraph setup: `docs/langgraph-setup.md`
 - Vector store setup: `docs/vector-store.md`
 - Knowledge API: `docs/knowledge-api.md`
+- Real ops connectors: `docs/real-ops-connectors.md`
