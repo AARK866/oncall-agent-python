@@ -129,6 +129,25 @@ class ToolResult(BaseModel):
     elapsed_ms: int | None = None
 
 
+class ToolBackendStatus(BaseModel):
+    name: str
+    configured: bool
+    required_settings: list[str] = Field(default_factory=list)
+    optional_settings: list[str] = Field(default_factory=list)
+    missing_settings: list[str] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class OpsToolHealthResponse(BaseModel):
+    mode: str
+    connector_name: str
+    ready: bool
+    tools: list[str] = Field(default_factory=list)
+    tool_schemas: list[dict[str, Any]] = Field(default_factory=list)
+    backends: list[ToolBackendStatus] = Field(default_factory=list)
+    message: str
+
+
 class ReactStep(BaseModel):
     thought: str
     action: ToolCall | None = None

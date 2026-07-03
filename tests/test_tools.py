@@ -1,7 +1,13 @@
 import asyncio
 
 from app.schemas import ToolCall
-from app.tools import ToolRegistry, create_mock_ops_registry, create_ops_connector, create_ops_tool_registry
+from app.tools import (
+    ToolRegistry,
+    create_mock_ops_registry,
+    create_ops_connector,
+    create_ops_tool_registry,
+    get_ops_tool_health,
+)
 from app.tools.real_ops_tools import create_real_ops_tools
 
 
@@ -83,3 +89,24 @@ def test_real_topology_placeholder_is_available() -> None:
     assert result["service"] == "payment-api"
     assert result["dependencies"] == []
     assert result["related_alerts"] == []
+
+
+def test_ops_tool_health_reports_mock_ready() -> None:
+    health = get_ops_tool_health(mode="mock")
+
+    assert health.ready is True
+    assert health.mode == "mock"
+    assert health.backends[0].name == "mock_data"
+
+
+def test_ops_tool_health_reports_real_missing_config() -> None:
+    health = get_ops_tool_health(mode="real")
+
+    assert health.ready is False
+    missing = {
+        setting
+        for backend in health.backends
+        for setting in backend.missing_settings
+    }
+    assert "PROMETHEUS_BASE_URL" in missing
+    assert "LOKI_BASE_URL" in missing

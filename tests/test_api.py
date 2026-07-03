@@ -107,3 +107,30 @@ def test_knowledge_document_returns_404_for_missing_doc() -> None:
     response = client.get("/api/knowledge/documents/missing.md")
 
     assert response.status_code == 404
+
+
+def test_tools_health_endpoint_reports_mock_mode() -> None:
+    response = client.get("/api/tools/health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mode"] == "mock"
+    assert data["connector_name"] == "mock_ops"
+    assert data["ready"] is True
+    assert "query_metrics" in data["tools"]
+
+
+def test_tools_health_endpoint_can_check_real_mode_config() -> None:
+    response = client.get("/api/tools/health?mode=real")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mode"] == "real"
+    assert data["connector_name"] == "real_ops"
+    assert data["ready"] is False
+    missing = {
+        setting
+        for backend in data["backends"]
+        for setting in backend["missing_settings"]
+    }
+    assert "PROMETHEUS_BASE_URL" in missing

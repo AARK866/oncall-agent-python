@@ -19,3 +19,4 @@ Docs:
 - Vector store setup: `docs/vector-store.md`
 - Knowledge API: `docs/knowledge-api.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
+- Tools health API: `docs/tools-health-api.md`
