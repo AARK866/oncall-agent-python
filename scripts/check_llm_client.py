@@ -17,6 +17,7 @@ async def main() -> int:
     print(f"- model: {settings.llm_model}")
     print(f"- base_url: {settings.llm_base_url}")
     print(f"- timeout_seconds: {settings.llm_timeout_seconds}")
+    print(f"- max_retries: {settings.llm_max_retries}")
     print(f"- api_key_set: {bool(settings.llm_api_key)}")
 
     try:

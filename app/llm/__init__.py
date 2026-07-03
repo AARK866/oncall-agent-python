@@ -1,5 +1,6 @@
 from app.llm.client import (
     LLMClient,
+    LangChainLLMClient,
     MockLLMClient,
     OpenAICompatibleLLMClient,
     create_llm_client,
@@ -7,6 +8,7 @@ from app.llm.client import (
 
 __all__ = [
     "LLMClient",
+    "LangChainLLMClient",
     "MockLLMClient",
     "OpenAICompatibleLLMClient",
     "create_llm_client",

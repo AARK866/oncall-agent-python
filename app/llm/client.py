@@ -197,19 +197,142 @@ class OpenAICompatibleLLMClient:
         return stripped
 
 
+class LangChainLLMClient:
+    """Production LLM client backed by LangChain chat models."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str | None = None,
+        timeout_seconds: int = 30,
+        max_retries: int = 6,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url.rstrip("/") if base_url else None
+        self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
+        self._model = None
+
+    async def generate(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        model = self._chat_model()
+        if tools:
+            model = model.bind_tools(tools)
+
+        response = await model.ainvoke(self._messages_to_langchain(messages))
+        return self._message_text(response)
+
+    async def stream(
+        self,
+        messages: Sequence[ChatMessage],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[str]:
+        model = self._chat_model()
+        if tools:
+            model = model.bind_tools(tools)
+
+        async for chunk in model.astream(self._messages_to_langchain(messages)):
+            text = self._message_text(chunk)
+            if text:
+                yield text
+
+    async def generate_json(
+        self,
+        messages: Sequence[ChatMessage],
+        schema: type[BaseModel],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> BaseModel:
+        model = self._chat_model()
+        if tools:
+            model = model.bind_tools(tools)
+
+        structured_model = model.with_structured_output(schema)
+        result = await structured_model.ainvoke(self._messages_to_langchain(messages))
+        if isinstance(result, schema):
+            return result
+        return schema.model_validate(result)
+
+    def _chat_model(self):
+        if self._model is not None:
+            return self._model
+
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "LangChain real LLM mode requires langchain-openai. "
+                "Install dependencies with: pip install -r requirements.txt"
+            ) from exc
+
+        self._model = ChatOpenAI(
+            model=self.model,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout=self.timeout_seconds,
+            max_retries=self.max_retries,
+        )
+        return self._model
+
+    def _messages_to_langchain(self, messages: Sequence[ChatMessage]) -> list[tuple[str, str]]:
+        role_map = {
+            MessageRole.system: "system",
+            MessageRole.user: "human",
+            MessageRole.assistant: "assistant",
+            MessageRole.tool: "tool",
+        }
+        return [(role_map[message.role], message.content) for message in messages]
+
+    def _message_text(self, message: Any) -> str:
+        text = getattr(message, "text", None)
+        if isinstance(text, str):
+            return text
+
+        content = getattr(message, "content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict):
+                    block_text = block.get("text") or block.get("content")
+                    if block_text:
+                        parts.append(str(block_text))
+                else:
+                    parts.append(str(block))
+            return "".join(parts)
+        return str(content)
+
+
 def create_llm_client() -> LLMClient:
     provider = settings.llm_provider.lower().strip()
     if provider in {"mock", "local"}:
         return MockLLMClient()
 
-    if provider in {"openai", "openai-compatible", "deepseek", "qwen"}:
+    if provider in {"langchain", "langchain-openai"}:
         if not settings.llm_api_key:
-            raise ValueError("LLM_API_KEY is required when LLM_PROVIDER is not mock.")
-        return OpenAICompatibleLLMClient(
+            raise ValueError("LLM_API_KEY is required when LLM_PROVIDER uses LangChain real LLM mode.")
+        return LangChainLLMClient(
             api_key=settings.llm_api_key,
             model=settings.llm_model,
             base_url=settings.llm_base_url,
             timeout_seconds=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
+        )
+
+    if provider in {"openai", "openai-compatible", "deepseek", "qwen"}:
+        if not settings.llm_api_key:
+            raise ValueError("LLM_API_KEY is required when LLM_PROVIDER is not mock.")
+        return LangChainLLMClient(
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+            base_url=settings.llm_base_url,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
         )
 
     raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")

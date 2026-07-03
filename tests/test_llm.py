@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from app.llm import MockLLMClient, OpenAICompatibleLLMClient, create_llm_client
+from app.llm import LangChainLLMClient, MockLLMClient, OpenAICompatibleLLMClient, create_llm_client
 from app.schemas import ChatMessage, MessageRole
 
 
@@ -63,3 +63,22 @@ def test_openai_compatible_extracts_json_from_markdown_fence() -> None:
     )
 
     assert client._extract_json('```json\n{"answer":"ok"}\n```') == '{"answer":"ok"}'
+
+
+def test_langchain_llm_message_conversion() -> None:
+    client = LangChainLLMClient(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.com/v1/",
+    )
+
+    messages = [
+        ChatMessage(role=MessageRole.system, content="system"),
+        ChatMessage(role=MessageRole.user, content="hello"),
+    ]
+
+    assert client.base_url == "https://example.com/v1"
+    assert client._messages_to_langchain(messages) == [
+        ("system", "system"),
+        ("human", "hello"),
+    ]

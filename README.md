@@ -15,6 +15,7 @@ Docs:
 - Architecture: `docs/architecture.md`
 - Integration roadmap: `docs/integration-roadmap.md`
 - LLM setup: `docs/llm-setup.md`
+- LangChain real LLM: `docs/langchain-real-llm.md`
 - LangGraph setup: `docs/langgraph-setup.md`
 - Vector store setup: `docs/vector-store.md`
 - Knowledge API: `docs/knowledge-api.md`
