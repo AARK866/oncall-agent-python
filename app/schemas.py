@@ -63,6 +63,40 @@ class SourceDocument(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class KnowledgeDocumentSummary(BaseModel):
+    doc_id: str
+    title: str
+    source: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class KnowledgeDocumentDetail(KnowledgeDocumentSummary):
+    content: str
+
+
+class KnowledgeStatsResponse(BaseModel):
+    document_count: int
+    chunk_count: int
+    retriever_mode: str
+    vector_store: str | None = None
+    services: list[str] = Field(default_factory=list)
+    incident_types: list[str] = Field(default_factory=list)
+
+
+class KnowledgeSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(default=3, ge=1, le=20)
+    service: str | None = None
+    incident_type: str | None = None
+    keywords: list[str] = Field(default_factory=list)
+
+
+class KnowledgeSearchResponse(BaseModel):
+    query: str
+    results: list[SourceDocument] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ChatResponse(BaseModel):
     session_id: str
     answer: str

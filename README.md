@@ -17,3 +17,4 @@ Docs:
 - LLM setup: `docs/llm-setup.md`
 - LangGraph setup: `docs/langgraph-setup.md`
 - Vector store setup: `docs/vector-store.md`
+- Knowledge API: `docs/knowledge-api.md`

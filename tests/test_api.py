@@ -62,3 +62,48 @@ def test_get_incident_returns_404_for_missing_id() -> None:
     response = client.get("/api/incidents/inc_missing")
 
     assert response.status_code == 404
+
+
+def test_knowledge_stats_and_documents_endpoints() -> None:
+    stats_response = client.get("/api/knowledge/stats")
+    assert stats_response.status_code == 200
+    stats = stats_response.json()
+    assert stats["document_count"] >= 2
+    assert stats["chunk_count"] >= 2
+    assert stats["retriever_mode"] in {"keyword", "vector", "hybrid"}
+
+    documents_response = client.get("/api/knowledge/documents")
+    assert documents_response.status_code == 200
+    documents = documents_response.json()
+    assert documents
+    assert {document["doc_id"] for document in documents} >= {"payment_5xx.md", "order_timeout.md"}
+
+    detail_response = client.get("/api/knowledge/documents/payment_5xx.md")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["doc_id"] == "payment_5xx.md"
+    assert "5xx" in detail["content"]
+
+
+def test_knowledge_search_endpoint() -> None:
+    response = client.post(
+        "/api/knowledge/search",
+        json={
+            "query": "payment service 5xx error rate",
+            "top_k": 2,
+            "service": "payment-api",
+            "incident_type": "5xx",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["query"] == "payment service 5xx error rate"
+    assert data["metadata"]["retrieved_count"] > 0
+    assert data["results"][0]["metadata"]["services"] == ["payment-api"]
+
+
+def test_knowledge_document_returns_404_for_missing_doc() -> None:
+    response = client.get("/api/knowledge/documents/missing.md")
+
+    assert response.status_code == 404
