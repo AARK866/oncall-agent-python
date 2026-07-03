@@ -24,6 +24,12 @@ class AlertSeverity(str, Enum):
     info = "info"
 
 
+class IncidentStatus(str, Enum):
+    open = "open"
+    investigating = "investigating"
+    resolved = "resolved"
+
+
 class AgentEventType(str, Enum):
     thinking = "thinking"
     tool_call = "tool_call"
@@ -121,3 +127,29 @@ class DiagnosisReport(BaseModel):
     recommendations: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class IncidentRecord(BaseModel):
+    incident_id: str
+    title: str
+    service: str
+    question: str
+    session_id: str
+    severity: AlertSeverity = AlertSeverity.warning
+    status: IncidentStatus = IncidentStatus.investigating
+    labels: dict[str, str] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DiagnosisRecord(BaseModel):
+    diagnosis_id: str
+    incident_id: str
+    answer: str
+    mode: ChatMode
+    sources: list[SourceDocument] = Field(default_factory=list)
+    tool_results: list[ToolResult] = Field(default_factory=list)
+    react_steps: list[ReactStep] = Field(default_factory=list)
+    plan_trace: PlanTrace | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

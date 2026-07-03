@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_base_url: str = "https://api.openai.com/v1"
     llm_timeout_seconds: int = 30
+    incident_db_path: str = "app/data/oncall_agent.db"
 
     model_config = SettingsConfigDict(
         env_file=".env",

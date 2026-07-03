@@ -16,6 +16,10 @@ env/
 .ruff_cache/
 .coverage
 htmlcov/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
 
 dist/
 build/

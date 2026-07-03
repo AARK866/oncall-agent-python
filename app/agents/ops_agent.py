@@ -2,6 +2,7 @@ from app.agents.knowledge_agent import KnowledgeAgent
 from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
 from app.schemas import ChatMode, ChatResponse, DiagnosisReport, ToolResult
+from app.storage import SQLiteIncidentStore
 from app.tools import ToolRegistry, create_mock_ops_registry
 
 
@@ -12,17 +13,20 @@ class OpsAgent:
         self,
         tool_registry: ToolRegistry,
         knowledge_agent: KnowledgeAgent,
+        incident_store: SQLiteIncidentStore | None = None,
     ) -> None:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
+        self.incident_store = incident_store
         self.react_loop = ReactLoop(tool_registry=tool_registry)
         self.plan_execute = PlanExecuteReplan(tool_registry=tool_registry)
 
     @classmethod
-    def create_default(cls) -> "OpsAgent":
+    def create_default(cls, incident_store: SQLiteIncidentStore | None = None) -> "OpsAgent":
         return cls(
             tool_registry=create_mock_ops_registry(),
             knowledge_agent=KnowledgeAgent.from_runbook_directory(),
+            incident_store=incident_store or SQLiteIncidentStore.from_settings(),
         )
 
     async def analyze(
@@ -52,7 +56,7 @@ class OpsAgent:
             runbook_answer=knowledge_response.answer,
         )
 
-        return ChatResponse(
+        response = ChatResponse(
             session_id=session_id,
             answer=self._format_report(report),
             mode=ChatMode.ops,
@@ -65,6 +69,36 @@ class OpsAgent:
                 "runbook_retrieved_count": knowledge_response.metadata.get("retrieved_count", 0),
             },
         )
+        self._persist_analysis(
+            question=question,
+            session_id=session_id,
+            service=target_service,
+            response=response,
+        )
+        return response
+
+    def _persist_analysis(
+        self,
+        question: str,
+        session_id: str,
+        service: str,
+        response: ChatResponse,
+    ) -> None:
+        if self.incident_store is None:
+            return
+
+        incident = self.incident_store.create_incident(
+            title=question[:120],
+            service=service,
+            question=question,
+            session_id=session_id,
+        )
+        response.metadata["incident_id"] = incident.incident_id
+        diagnosis = self.incident_store.save_diagnosis(
+            incident_id=incident.incident_id,
+            response=response,
+        )
+        response.metadata["diagnosis_id"] = diagnosis.diagnosis_id
 
     def _infer_service(self, question: str) -> str:
         normalized = question.lower()
