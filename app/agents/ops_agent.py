@@ -3,6 +3,7 @@ from app.agents.llm_ops_assistant import LLMOpsAssistant
 from app.agents.ops_graph import OpsGraphWorkflow
 from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
+from app.config import settings
 from app.llm import LLMClient, create_llm_client
 from app.schemas import ChatMode, ChatResponse, DiagnosisReport, ToolResult
 from app.storage import SQLiteIncidentStore
@@ -36,6 +37,7 @@ class OpsAgent:
             build_report=self._build_report,
             format_report=self._format_report,
             persist_analysis=self._persist_analysis,
+            graph_runtime=settings.ops_graph_runtime,
         )
 
     @classmethod

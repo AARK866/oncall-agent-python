@@ -15,3 +15,4 @@ Docs:
 - Architecture: `docs/architecture.md`
 - Integration roadmap: `docs/integration-roadmap.md`
 - LLM setup: `docs/llm-setup.md`
+- LangGraph setup: `docs/langgraph-setup.md`

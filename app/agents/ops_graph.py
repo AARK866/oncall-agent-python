@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from importlib.util import find_spec
 from typing import Any
 
 from app.agents.knowledge_agent import KnowledgeAgent
@@ -27,6 +28,8 @@ class OpsGraphState:
     summary_metadata: dict[str, Any] = field(default_factory=dict)
     response: ChatResponse | None = None
     graph_trace: list[str] = field(default_factory=list)
+    graph_runtime: str = "local"
+    graph_runtime_reason: str = "default"
 
 
 class OpsGraphWorkflow:
@@ -43,6 +46,7 @@ class OpsGraphWorkflow:
         build_report: Callable[[str, list[ToolResult], str], DiagnosisReport],
         format_report: Callable[[DiagnosisReport], str],
         persist_analysis: Callable[[str, str, str, ChatResponse], None],
+        graph_runtime: str = "local",
     ) -> None:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
@@ -53,6 +57,7 @@ class OpsGraphWorkflow:
         self.build_report = build_report
         self.format_report = format_report
         self.persist_analysis = persist_analysis
+        self.graph_runtime = graph_runtime
 
     async def run(
         self,
@@ -68,12 +73,92 @@ class OpsGraphWorkflow:
         nodes = self._nodes()
         state.graph_trace = [name for name, _ in nodes]
 
-        for _, node in nodes:
-            await node(state)
+        runtime = self.graph_runtime.strip().lower()
+        if runtime == "langgraph":
+            await self._run_with_langgraph(state, nodes, strict=True)
+        elif runtime == "auto":
+            await self._run_with_langgraph(state, nodes, strict=False)
+        elif runtime == "local":
+            await self._run_local(state, nodes, reason="configured_local")
+        else:
+            raise ValueError(f"Unsupported OPS_GRAPH_RUNTIME: {self.graph_runtime}")
 
         if state.response is None:
             raise RuntimeError("Ops graph completed without a response.")
         return state.response
+
+    async def _run_local(
+        self,
+        state: OpsGraphState,
+        nodes: list[tuple[str, Callable[[OpsGraphState], Any]]],
+        reason: str,
+    ) -> None:
+        state.graph_runtime = "local"
+        state.graph_runtime_reason = reason
+        for _, node in nodes:
+            await node(state)
+
+    async def _run_with_langgraph(
+        self,
+        state: OpsGraphState,
+        nodes: list[tuple[str, Callable[[OpsGraphState], Any]]],
+        strict: bool,
+    ) -> None:
+        if not self._is_langgraph_available():
+            if strict:
+                raise RuntimeError(
+                    "OPS_GRAPH_RUNTIME=langgraph requires the langgraph package. "
+                    "Install it with: pip install -r requirements.txt"
+                )
+            await self._run_local(state, nodes, reason="langgraph_not_installed")
+            return
+
+        try:
+            await self._invoke_langgraph(state, nodes)
+        except Exception:
+            if strict:
+                raise
+            await self._run_local(state, nodes, reason="langgraph_runtime_failed")
+
+    async def _invoke_langgraph(
+        self,
+        state: OpsGraphState,
+        nodes: list[tuple[str, Callable[[OpsGraphState], Any]]],
+    ) -> None:
+        from langgraph.graph import END, StateGraph
+
+        graph = StateGraph(dict)
+        for name, node in nodes:
+            graph.add_node(name, self._langgraph_node(node))
+
+        graph.set_entry_point(nodes[0][0])
+        for index in range(len(nodes) - 1):
+            graph.add_edge(nodes[index][0], nodes[index + 1][0])
+        graph.add_edge(nodes[-1][0], END)
+
+        state.graph_runtime = "langgraph"
+        state.graph_runtime_reason = "configured_langgraph"
+        compiled_graph = graph.compile()
+        result = await compiled_graph.ainvoke({"ops_state": state})
+        final_state = result.get("ops_state")
+        if not isinstance(final_state, OpsGraphState):
+            raise RuntimeError("LangGraph did not return an OpsGraphState.")
+
+        state.__dict__.update(final_state.__dict__)
+
+    def _langgraph_node(
+        self,
+        node: Callable[[OpsGraphState], Any],
+    ) -> Callable[[dict[str, Any]], Any]:
+        async def wrapped(raw_state: dict[str, Any]) -> dict[str, Any]:
+            ops_state = raw_state["ops_state"]
+            await node(ops_state)
+            return {"ops_state": ops_state}
+
+        return wrapped
+
+    def _is_langgraph_available(self) -> bool:
+        return find_spec("langgraph") is not None
 
     def _nodes(self) -> list[tuple[str, Callable[[OpsGraphState], Any]]]:
         return [
@@ -156,6 +241,12 @@ class OpsGraphWorkflow:
                 "llm_tool_selection": state.tool_selection_metadata,
                 "llm_summary": state.summary_metadata,
                 "graph_trace": state.graph_trace,
+                "graph_runtime": {
+                    "requested": self.graph_runtime,
+                    "used": state.graph_runtime,
+                    "reason": state.graph_runtime_reason,
+                    "langgraph_available": self._is_langgraph_available(),
+                },
             },
         )
 
