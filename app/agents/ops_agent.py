@@ -1,5 +1,6 @@
 from app.agents.knowledge_agent import KnowledgeAgent
 from app.agents.llm_ops_assistant import LLMOpsAssistant
+from app.agents.ops_graph import OpsGraphWorkflow
 from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
 from app.llm import LLMClient, create_llm_client
@@ -25,6 +26,17 @@ class OpsAgent:
         self.react_loop = ReactLoop(tool_registry=tool_registry)
         self.plan_execute = PlanExecuteReplan(tool_registry=tool_registry)
         self.llm_ops_assistant = LLMOpsAssistant(llm=self.llm, tool_registry=tool_registry)
+        self.graph = OpsGraphWorkflow(
+            tool_registry=self.tool_registry,
+            knowledge_agent=self.knowledge_agent,
+            react_loop=self.react_loop,
+            plan_execute=self.plan_execute,
+            llm_ops_assistant=self.llm_ops_assistant,
+            infer_service=self._infer_service,
+            build_report=self._build_report,
+            format_report=self._format_report,
+            persist_analysis=self._persist_analysis,
+        )
 
     @classmethod
     def create_default(
@@ -45,66 +57,11 @@ class OpsAgent:
         session_id: str = "default",
         service: str | None = None,
     ) -> ChatResponse:
-        target_service = service or self._infer_service(question)
-        plan_trace = await self.plan_execute.run(service=target_service)
-        selected_tool_calls, tool_selection_metadata = await self.llm_ops_assistant.select_tool_calls(
-            question=question,
-            service=target_service,
-            fallback_tool_calls=self.react_loop.default_tool_calls(target_service),
-        )
-        react_steps = await self.react_loop.run(
-            question=question,
-            service=target_service,
-            tool_calls=selected_tool_calls,
-        )
-        tool_results = [
-            step.observation
-            for step in react_steps
-            if step.observation is not None
-        ]
-        knowledge_response = await self.knowledge_agent.answer(
+        return await self.graph.run(
             question=question,
             session_id=session_id,
-            top_k=2,
-            service=target_service,
-            incident_type="5xx" if "5xx" in question.lower() else None,
+            service=service,
         )
-        fallback_report = self._build_report(
-            service=target_service,
-            tool_results=tool_results,
-            runbook_answer=knowledge_response.answer,
-        )
-        report, summary_metadata = await self.llm_ops_assistant.summarize(
-            question=question,
-            service=target_service,
-            tool_results=tool_results,
-            sources=knowledge_response.sources,
-            fallback_report=fallback_report,
-        )
-
-        response = ChatResponse(
-            session_id=session_id,
-            answer=self._format_report(report),
-            mode=ChatMode.ops,
-            sources=knowledge_response.sources,
-            metadata={
-                "service": target_service,
-                "tool_results": [result.model_dump() for result in tool_results],
-                "react_steps": [step.model_dump() for step in react_steps],
-                "plan_trace": plan_trace.model_dump(),
-                "runbook_retrieved_count": knowledge_response.metadata.get("retrieved_count", 0),
-                "tool_connector": self.tool_registry.describe(),
-                "llm_tool_selection": tool_selection_metadata,
-                "llm_summary": summary_metadata,
-            },
-        )
-        self._persist_analysis(
-            question=question,
-            session_id=session_id,
-            service=target_service,
-            response=response,
-        )
-        return response
 
     def _persist_analysis(
         self,

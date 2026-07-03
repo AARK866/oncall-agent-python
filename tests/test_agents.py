@@ -69,6 +69,17 @@ def test_ops_agent_returns_diagnosis_with_traces() -> None:
 
     assert response.mode == ChatMode.ops
     assert response.metadata["service"] == "payment-api"
+    assert response.metadata["graph_trace"] == [
+        "infer_service",
+        "plan",
+        "select_tools",
+        "execute_tools",
+        "retrieve_runbook",
+        "build_fallback_report",
+        "summarize_report",
+        "build_response",
+        "persist_incident",
+    ]
     assert len(response.metadata["react_steps"]) == 5
     assert len(response.metadata["plan_trace"]["plan"]) == 4
     assert "诊断结论" in response.answer
