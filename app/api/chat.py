@@ -8,12 +8,11 @@ from app.agents import ConversationAgent
 from app.schemas import AgentEvent, AgentEventType, ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/api", tags=["chat"])
-conversation_agent = ConversationAgent.create_default()
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
-    return await conversation_agent.chat(request)
+    return await _conversation_agent().chat(request)
 
 
 @router.post("/chat/stream")
@@ -34,7 +33,7 @@ async def _stream_chat_events(request: ChatRequest) -> AsyncIterator[str]:
         )
     )
 
-    response = await conversation_agent.chat(request)
+    response = await _conversation_agent().chat(request)
 
     for step in response.metadata.get("react_steps", []):
         yield _format_sse(
@@ -86,3 +85,7 @@ async def _stream_chat_events(request: ChatRequest) -> AsyncIterator[str]:
 def _format_sse(event: AgentEvent) -> str:
     data = json.dumps(event.data, ensure_ascii=False)
     return f"event: {event.event.value}\ndata: {data}\n\n"
+
+
+def _conversation_agent() -> ConversationAgent:
+    return ConversationAgent.create_default()

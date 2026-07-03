@@ -11,16 +11,16 @@ from app.schemas import (
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
-knowledge_base = KnowledgeBase.from_directory("app/data/runbooks")
-
 
 @router.get("/stats", response_model=KnowledgeStatsResponse)
 async def get_knowledge_stats() -> KnowledgeStatsResponse:
+    knowledge_base = _knowledge_base()
     return KnowledgeStatsResponse.model_validate(knowledge_base.stats())
 
 
 @router.get("/documents", response_model=list[KnowledgeDocumentSummary])
 async def list_knowledge_documents() -> list[KnowledgeDocumentSummary]:
+    knowledge_base = _knowledge_base()
     return [
         KnowledgeDocumentSummary.model_validate(document)
         for document in knowledge_base.list_documents()
@@ -29,6 +29,7 @@ async def list_knowledge_documents() -> list[KnowledgeDocumentSummary]:
 
 @router.get("/documents/{doc_id:path}", response_model=KnowledgeDocumentDetail)
 async def get_knowledge_document(doc_id: str) -> KnowledgeDocumentDetail:
+    knowledge_base = _knowledge_base()
     document = knowledge_base.get_document(doc_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Knowledge document not found")
@@ -44,6 +45,7 @@ async def get_knowledge_document(doc_id: str) -> KnowledgeDocumentDetail:
 
 @router.post("/search", response_model=KnowledgeSearchResponse)
 async def search_knowledge(request: KnowledgeSearchRequest) -> KnowledgeSearchResponse:
+    knowledge_base = _knowledge_base()
     results = knowledge_base.search(
         query=request.query,
         top_k=request.top_k,
@@ -59,3 +61,7 @@ async def search_knowledge(request: KnowledgeSearchRequest) -> KnowledgeSearchRe
             "knowledge_base": knowledge_base.stats(),
         },
     )
+
+
+def _knowledge_base() -> KnowledgeBase:
+    return KnowledgeBase.from_directory("app/data/runbooks")

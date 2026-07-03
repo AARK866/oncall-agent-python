@@ -23,9 +23,9 @@ class MilvusVectorStore:
         client: Any | None = None,
     ) -> None:
         self.embedding_model = embedding_model or create_embedding_model()
-        self.uri = uri or settings.milvus_uri
-        self.token = token or settings.milvus_token
-        self.db_name = db_name or settings.milvus_db_name
+        self.uri = settings.milvus_uri if uri is None else uri
+        self.token = settings.milvus_token if token is None else token
+        self.db_name = settings.milvus_db_name if db_name is None else db_name
         self.collection_name = collection_name or settings.milvus_collection_name
         self.dimensions = dimensions or settings.embedding_dimensions
         self.primary_field = settings.milvus_primary_field
