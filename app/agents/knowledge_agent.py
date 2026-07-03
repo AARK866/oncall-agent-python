@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Sequence
 
-from app.llm import LLMClient, MockLLMClient
+from app.llm import LLMClient, create_llm_client
 from app.rag import LocalKnowledgeBase
 from app.schemas import ChatMessage, ChatMode, ChatResponse, MessageRole, SourceDocument
 
@@ -11,7 +11,7 @@ class KnowledgeAgent:
 
     def __init__(self, knowledge_base: LocalKnowledgeBase, llm: LLMClient | None = None) -> None:
         self.knowledge_base = knowledge_base
-        self.llm = llm or MockLLMClient()
+        self.llm = llm or create_llm_client()
 
     @classmethod
     def from_runbook_directory(

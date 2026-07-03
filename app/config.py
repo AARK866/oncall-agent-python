@@ -6,6 +6,11 @@ class Settings(BaseSettings):
     app_env: str = "local"
     app_version: str = "0.1.0"
     api_prefix: str = "/api"
+    llm_provider: str = "mock"
+    llm_model: str = "mock-oncall-agent"
+    llm_api_key: str | None = None
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_timeout_seconds: int = 30
 
     model_config = SettingsConfigDict(
         env_file=".env",

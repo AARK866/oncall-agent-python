@@ -1,6 +1,6 @@
 from app.agents.knowledge_agent import KnowledgeAgent
 from app.agents.ops_agent import OpsAgent
-from app.llm import LLMClient, MockLLMClient
+from app.llm import LLMClient, create_llm_client
 from app.memory import InMemoryConversationMemory
 from app.schemas import ChatMode, ChatRequest, ChatResponse
 
@@ -18,7 +18,7 @@ class ConversationAgent:
         self.knowledge_agent = knowledge_agent
         self.ops_agent = ops_agent or OpsAgent.create_default()
         self.memory = memory or InMemoryConversationMemory()
-        self.llm = llm or MockLLMClient()
+        self.llm = llm or create_llm_client()
 
     @classmethod
     def create_default(cls) -> "ConversationAgent":
