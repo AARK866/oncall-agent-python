@@ -67,7 +67,10 @@ class MockLLMClient:
         schema: type[BaseModel],
         tools: list[dict[str, Any]] | None = None,
     ) -> BaseModel:
-        return schema.model_construct()
+        try:
+            return schema()
+        except Exception:
+            return schema.model_construct()
 
     def _last_user_message(self, messages: Sequence[ChatMessage]) -> str | None:
         for message in reversed(messages):
@@ -151,7 +154,7 @@ class OpenAICompatibleLLMClient:
         tools: list[dict[str, Any]] | None = None,
     ) -> BaseModel:
         answer = await self.generate(messages=messages, tools=tools)
-        return schema.model_validate_json(answer)
+        return schema.model_validate_json(self._extract_json(answer))
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -175,6 +178,23 @@ class OpenAICompatibleLLMClient:
 
         data = json.loads(raw_data)
         return data["choices"][0].get("delta", {}).get("content")
+
+    def _extract_json(self, text: str) -> str:
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            stripped = "\n".join(lines).strip()
+
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start >= 0 and end >= start:
+            return stripped[start : end + 1]
+
+        return stripped
 
 
 def create_llm_client() -> LLMClient:

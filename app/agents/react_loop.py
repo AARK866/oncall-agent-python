@@ -3,49 +3,46 @@ from app.tools import ToolRegistry
 
 
 class ReactLoop:
-    """Deterministic ReAct loop for local ops troubleshooting."""
+    """ReAct loop that can run default or LLM-selected ops tools."""
 
     def __init__(self, tool_registry: ToolRegistry) -> None:
         self.tool_registry = tool_registry
 
-    async def run(self, question: str, service: str) -> list[ReactStep]:
+    async def run(
+        self,
+        question: str,
+        service: str,
+        tool_calls: list[ToolCall] | None = None,
+    ) -> list[ReactStep]:
         steps: list[ReactStep] = []
+        calls = tool_calls or self.default_tool_calls(service)
 
-        metrics = await self._act(
-            steps=steps,
-            thought=f"先确认 {service} 的错误率、延迟和资源指标是否异常。",
-            action=ToolCall(name="query_metrics", arguments={"service": service, "window": "30m"}),
-        )
-
-        logs = await self._act(
-            steps=steps,
-            thought="指标存在异常后，需要查看同一时间窗口的错误日志，寻找直接报错信号。",
-            action=ToolCall(name="query_logs", arguments={"service": service, "window": "30m"}),
-        )
-
-        deployments = await self._act(
-            steps=steps,
-            thought="如果异常有明确开始时间，需要检查附近是否发生过发布变更。",
-            action=ToolCall(name="query_deployments", arguments={"service": service, "window": "1h"}),
-        )
-
-        topology = await self._act(
-            steps=steps,
-            thought="服务自身异常还可能来自上下游依赖，需要查看服务拓扑和相邻告警。",
-            action=ToolCall(name="query_service_topology", arguments={"service": service}),
-        )
-
-        steps.append(
-            ReactStep(
-                thought=self._final_thought(
-                    metrics=metrics,
-                    logs=logs,
-                    deployments=deployments,
-                    topology=topology,
-                )
+        for tool_call in calls:
+            observation = await self._act(
+                steps=steps,
+                thought=self._thought_for_tool(tool_call.name, service),
+                action=self._normalize_tool_call(tool_call, service),
             )
-        )
+            if observation.success is False:
+                steps.append(
+                    ReactStep(
+                        thought=(
+                            f"{tool_call.name} failed, so the final diagnosis should mark this "
+                            "evidence as incomplete."
+                        )
+                    )
+                )
+
+        steps.append(ReactStep(thought=self._final_thought(steps)))
         return steps
+
+    def default_tool_calls(self, service: str) -> list[ToolCall]:
+        return [
+            ToolCall(name="query_metrics", arguments={"service": service, "window": "30m"}),
+            ToolCall(name="query_logs", arguments={"service": service, "window": "30m"}),
+            ToolCall(name="query_deployments", arguments={"service": service, "window": "1h"}),
+            ToolCall(name="query_service_topology", arguments={"service": service}),
+        ]
 
     async def _act(
         self,
@@ -63,24 +60,45 @@ class ReactLoop:
         )
         return observation
 
-    def _final_thought(
-        self,
-        metrics: ToolResult,
-        logs: ToolResult,
-        deployments: ToolResult,
-        topology: ToolResult,
-    ) -> str:
+    def _normalize_tool_call(self, tool_call: ToolCall, service: str) -> ToolCall:
+        arguments = dict(tool_call.arguments)
+        arguments.setdefault("service", service)
+        return ToolCall(name=tool_call.name, arguments=arguments, trace_id=tool_call.trace_id)
+
+    def _thought_for_tool(self, tool_name: str, service: str) -> str:
+        thoughts = {
+            "query_metrics": f"Check {service} metrics first to confirm error rate, latency, and resource pressure.",
+            "query_logs": "Inspect logs in the same time window to find direct error signals.",
+            "query_deployments": "Check recent deployments because incidents often correlate with change windows.",
+            "query_service_topology": "Inspect upstream and downstream dependencies for related alerts.",
+        }
+        return thoughts.get(tool_name, f"Run {tool_name} because it may provide useful incident evidence.")
+
+    def _final_thought(self, steps: list[ReactStep]) -> str:
+        result_map = {
+            step.observation.tool_name: step.observation
+            for step in steps
+            if step.observation is not None
+        }
         clues: list[str] = []
-        if "8.7%" in str(metrics.data.get("http_5xx_rate", "")):
-            clues.append("错误率明显升高")
-        if "connection pool exhausted" in str(logs.data).lower():
-            clues.append("日志出现数据库连接池耗尽")
-        if deployments.data.get("deployments"):
-            clues.append("异常前后存在发布记录")
-        if topology.data.get("related_alerts"):
-            clues.append("拓扑中存在相邻依赖告警")
+
+        metrics = result_map.get("query_metrics")
+        if metrics and "8.7%" in str(metrics.data.get("http_5xx_rate", "")):
+            clues.append("5xx rate is clearly elevated")
+
+        logs = result_map.get("query_logs")
+        if logs and "connection pool exhausted" in str(logs.data).lower():
+            clues.append("logs mention database connection pool exhaustion")
+
+        deployments = result_map.get("query_deployments")
+        if deployments and deployments.data.get("deployments"):
+            clues.append("there was a recent deployment near the incident window")
+
+        topology = result_map.get("query_service_topology")
+        if topology and topology.data.get("related_alerts"):
+            clues.append("related dependency alerts exist in the service topology")
 
         if clues:
-            return f"综合观察结果，关键线索包括：{'、'.join(clues)}。可以进入最终诊断汇总。"
+            return f"Collected evidence points to: {', '.join(clues)}."
 
-        return "工具观察结果暂未形成明确线索，需要补充更多时间窗口或真实监控数据。"
+        return "The selected tools did not produce a single high-confidence root cause."

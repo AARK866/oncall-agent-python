@@ -1,6 +1,8 @@
 from app.agents.knowledge_agent import KnowledgeAgent
+from app.agents.llm_ops_assistant import LLMOpsAssistant
 from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
+from app.llm import LLMClient, create_llm_client
 from app.schemas import ChatMode, ChatResponse, DiagnosisReport, ToolResult
 from app.storage import SQLiteIncidentStore
 from app.tools import ToolRegistry, create_ops_tool_registry
@@ -14,19 +16,27 @@ class OpsAgent:
         tool_registry: ToolRegistry,
         knowledge_agent: KnowledgeAgent,
         incident_store: SQLiteIncidentStore | None = None,
+        llm: LLMClient | None = None,
     ) -> None:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
         self.incident_store = incident_store
+        self.llm = llm or create_llm_client()
         self.react_loop = ReactLoop(tool_registry=tool_registry)
         self.plan_execute = PlanExecuteReplan(tool_registry=tool_registry)
+        self.llm_ops_assistant = LLMOpsAssistant(llm=self.llm, tool_registry=tool_registry)
 
     @classmethod
-    def create_default(cls, incident_store: SQLiteIncidentStore | None = None) -> "OpsAgent":
+    def create_default(
+        cls,
+        incident_store: SQLiteIncidentStore | None = None,
+        llm: LLMClient | None = None,
+    ) -> "OpsAgent":
         return cls(
             tool_registry=create_ops_tool_registry(),
             knowledge_agent=KnowledgeAgent.from_runbook_directory(),
             incident_store=incident_store or SQLiteIncidentStore.from_settings(),
+            llm=llm,
         )
 
     async def analyze(
@@ -37,7 +47,16 @@ class OpsAgent:
     ) -> ChatResponse:
         target_service = service or self._infer_service(question)
         plan_trace = await self.plan_execute.run(service=target_service)
-        react_steps = await self.react_loop.run(question=question, service=target_service)
+        selected_tool_calls, tool_selection_metadata = await self.llm_ops_assistant.select_tool_calls(
+            question=question,
+            service=target_service,
+            fallback_tool_calls=self.react_loop.default_tool_calls(target_service),
+        )
+        react_steps = await self.react_loop.run(
+            question=question,
+            service=target_service,
+            tool_calls=selected_tool_calls,
+        )
         tool_results = [
             step.observation
             for step in react_steps
@@ -50,10 +69,17 @@ class OpsAgent:
             service=target_service,
             incident_type="5xx" if "5xx" in question.lower() else None,
         )
-        report = self._build_report(
+        fallback_report = self._build_report(
             service=target_service,
             tool_results=tool_results,
             runbook_answer=knowledge_response.answer,
+        )
+        report, summary_metadata = await self.llm_ops_assistant.summarize(
+            question=question,
+            service=target_service,
+            tool_results=tool_results,
+            sources=knowledge_response.sources,
+            fallback_report=fallback_report,
         )
 
         response = ChatResponse(
@@ -68,6 +94,8 @@ class OpsAgent:
                 "plan_trace": plan_trace.model_dump(),
                 "runbook_retrieved_count": knowledge_response.metadata.get("retrieved_count", 0),
                 "tool_connector": self.tool_registry.describe(),
+                "llm_tool_selection": tool_selection_metadata,
+                "llm_summary": summary_metadata,
             },
         )
         self._persist_analysis(
