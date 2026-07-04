@@ -47,6 +47,9 @@ class LangChainEmbeddingModel:
         model: str,
         base_url: str | None = None,
         dimensions: int | None = None,
+        request_dimensions: bool = False,
+        tiktoken_enabled: bool = False,
+        check_ctx_length: bool = False,
         timeout_seconds: int = 30,
         max_retries: int = 6,
     ) -> None:
@@ -54,6 +57,9 @@ class LangChainEmbeddingModel:
         self.model = model
         self.base_url = base_url.rstrip("/") if base_url else None
         self.dimensions = dimensions
+        self.request_dimensions = request_dimensions
+        self.tiktoken_enabled = tiktoken_enabled
+        self.check_ctx_length = check_ctx_length
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self._model: Any | None = None
@@ -81,10 +87,12 @@ class LangChainEmbeddingModel:
             "api_key": self.api_key,
             "timeout": self.timeout_seconds,
             "max_retries": self.max_retries,
+            "tiktoken_enabled": self.tiktoken_enabled,
+            "check_embedding_ctx_length": self.check_ctx_length,
         }
         if self.base_url:
             kwargs["base_url"] = self.base_url
-        if self.dimensions:
+        if self.request_dimensions and self.dimensions:
             kwargs["dimensions"] = self.dimensions
 
         self._model = OpenAIEmbeddings(**kwargs)
@@ -106,6 +114,9 @@ def create_embedding_model() -> EmbeddingModel:
             model=settings.embedding_model,
             base_url=settings.embedding_base_url,
             dimensions=settings.embedding_dimensions,
+            request_dimensions=settings.embedding_request_dimensions,
+            tiktoken_enabled=settings.embedding_tiktoken_enabled,
+            check_ctx_length=settings.embedding_check_ctx_length,
             timeout_seconds=settings.embedding_timeout_seconds,
             max_retries=settings.embedding_max_retries,
         )

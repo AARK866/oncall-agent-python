@@ -34,6 +34,9 @@ EMBEDDING_MODEL=text-embedding-3-small
 EMBEDDING_API_KEY=your_embedding_api_key
 EMBEDDING_BASE_URL=https://api.openai.com/v1
 EMBEDDING_DIMENSIONS=1536
+EMBEDDING_REQUEST_DIMENSIONS=false
+EMBEDDING_TIKTOKEN_ENABLED=false
+EMBEDDING_CHECK_CTX_LENGTH=false
 ```
 
 Used by:
@@ -44,6 +47,18 @@ Used by:
 
 DeepSeek chat keys are for chat completion. If your provider does not expose embedding models,
 use a separate embedding provider such as OpenAI, DashScope, or another OpenAI-compatible embedding service.
+
+`EMBEDDING_DIMENSIONS` configures the vector size expected by Milvus. Keep
+`EMBEDDING_REQUEST_DIMENSIONS=false` for providers such as Ollama that infer the
+embedding size from the selected model. Only set it to `true` when the provider
+supports a request-level dimensions parameter.
+
+Keep `EMBEDDING_TIKTOKEN_ENABLED=false` for local OpenAI-compatible providers
+such as Ollama, otherwise LangChain may try to download tokenizer files from the
+internet before calling the local embedding endpoint.
+
+Keep `EMBEDDING_CHECK_CTX_LENGTH=false` for local Ollama-style embedding models
+to avoid pulling tokenizer dependencies only for request-size checks.
 
 ## 3. Real Milvus
 
@@ -75,3 +90,22 @@ Used by:
 3. Start Milvus, fill `MILVUS_URI`.
 4. Set `KNOWLEDGE_RETRIEVER_MODE=hybrid` and `KNOWLEDGE_VECTOR_STORE=milvus`.
 5. Run the API and test `/api/knowledge/search`.
+
+## Stack Check
+
+Run the full enterprise stack check:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_enterprise_stack.py
+```
+
+Useful focused checks:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_enterprise_stack.py --config-only
+.\.venv\Scripts\python.exe scripts\check_enterprise_stack.py --skip-github
+.\.venv\Scripts\python.exe scripts\check_enterprise_stack.py --skip-prometheus --skip-loki
+```
+
+The script prints only whether secrets are configured. It does not print API keys
+or tokens.

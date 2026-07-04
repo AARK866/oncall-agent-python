@@ -7,6 +7,7 @@ Useful commands:
 ```powershell
 python -m uvicorn app.main:app --reload
 python scripts/check_llm_client.py
+python scripts/check_enterprise_stack.py
 .\.venv\Scripts\python.exe -m pytest
 ```
 

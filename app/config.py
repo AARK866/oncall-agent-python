@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     embedding_api_key: str | None = None
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_dimensions: int = 1536
+    embedding_request_dimensions: bool = False
+    embedding_tiktoken_enabled: bool = False
+    embedding_check_ctx_length: bool = False
     embedding_timeout_seconds: int = 30
     embedding_max_retries: int = 6
     knowledge_vector_store: str = "in_memory"
@@ -37,6 +40,10 @@ class Settings(BaseSettings):
     gitlab_token: str | None = None
     gitlab_project_id: str | None = None
     gitlab_timeout_seconds: int = 10
+    github_token: str | None = None
+    github_repo: str | None = None
+    github_branch: str = "main"
+    github_timeout_seconds: int = 10
     ops_graph_runtime: str = "local"
     knowledge_retriever_mode: str = "keyword"
 
