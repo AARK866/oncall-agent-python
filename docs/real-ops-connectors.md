@@ -56,6 +56,20 @@ metadata.tool_results
 
 If a required URL or token is missing, the tool result will show a clear configuration error.
 
+## Real Incident Flow Check
+
+Run one full OpsAgent diagnosis with real tools:
+
+```powershell
+$env:HTTP_PROXY='http://127.0.0.1:7897'
+$env:HTTPS_PROXY='http://127.0.0.1:7897'
+.\.venv\Scripts\python.exe scripts\check_real_incident_flow.py --mock-llm
+```
+
+`--mock-llm` keeps Prometheus, Loki, Milvus, and GitHub real, but avoids blocking
+the infrastructure check on external LLM connectivity. Remove it when the LLM
+proxy is configured for Python processes.
+
 ## Current Tool Mapping
 
 | Agent tool | Real backend |

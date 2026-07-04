@@ -161,7 +161,7 @@ class OpsAgent:
             evidence.append(str(metrics.data.get("summary", "指标查询成功。")))
         if logs and logs.success:
             evidence.append(str(logs.data.get("summary", "日志查询成功。")))
-            for item in logs.data.get("logs", [])[:2]:
+            for item in self._log_evidence_items(logs.data.get("logs")):
                 evidence.append(f"{item.get('timestamp')} {item.get('level')}: {item.get('message')}")
         if deployments and deployments.success:
             deployments_data = deployments.data.get("deployments", [])
@@ -183,6 +183,35 @@ class OpsAgent:
                 evidence.append(f"发现相邻告警：{related_alerts[0].get('title')}")
 
         return evidence
+
+    def _log_evidence_items(self, logs: object) -> list[dict[str, str]]:
+        if isinstance(logs, list):
+            return [item for item in logs[:2] if isinstance(item, dict)]
+
+        if not isinstance(logs, dict):
+            return []
+
+        results = logs.get("data", {}).get("result", [])
+        if not isinstance(results, list):
+            return []
+
+        items: list[dict[str, str]] = []
+        for stream in results[:2]:
+            if not isinstance(stream, dict):
+                continue
+            labels = stream.get("stream", {})
+            values = stream.get("values", [])
+            if not isinstance(labels, dict) or not values:
+                continue
+            timestamp, message = values[0]
+            items.append(
+                {
+                    "timestamp": str(timestamp),
+                    "level": str(labels.get("level") or labels.get("severity") or "INFO"),
+                    "message": str(message),
+                }
+            )
+        return items
 
     def _collect_recommendations(
         self,

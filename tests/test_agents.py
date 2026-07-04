@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.agents import ConversationAgent, KnowledgeAgent, OpsAgent
-from app.schemas import ChatMessage, ChatMode, ChatRequest, ToolCall
+from app.schemas import ChatMessage, ChatMode, ChatRequest, ToolCall, ToolResult
 from app.storage import SQLiteIncidentStore
 from app.tools import create_ops_tool_registry
 
@@ -117,6 +117,32 @@ def test_ops_agent_uses_llm_for_tool_selection_and_summary(tmp_path) -> None:
     assert response.metadata["llm_summary"]["source"] == "llm"
     assert len(response.metadata["react_steps"]) == 3
     assert "LLM summary" in response.answer
+
+
+def test_ops_agent_collects_loki_log_evidence_from_real_response_shape() -> None:
+    agent = OpsAgent.create_default()
+    logs = ToolResult(
+        tool_name="query_logs",
+        success=True,
+        data={
+            "summary": "Queried Loki logs for payment-api.",
+            "logs": {
+                "data": {
+                    "result": [
+                        {
+                            "stream": {"level": "ERROR"},
+                            "values": [["1720000000000000000", "connection pool exhausted"]],
+                        }
+                    ]
+                }
+            },
+        },
+    )
+
+    evidence = agent._collect_evidence(None, logs, None, None, None)
+
+    assert "Queried Loki logs" in evidence[0]
+    assert "connection pool exhausted" in evidence[1]
 
 
 def test_conversation_agent_routes_knowledge_and_ops() -> None:
