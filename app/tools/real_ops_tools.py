@@ -1,7 +1,7 @@
 from typing import Any
 
 from app.tools.base import SimpleTool
-from app.tools.real_ops_clients import GitLabClient, LokiClient, PrometheusClient
+from app.tools.real_ops_clients import GitHubClient, GitLabClient, LokiClient, PrometheusClient
 
 
 class RealOpsToolset:
@@ -10,10 +10,12 @@ class RealOpsToolset:
         prometheus: PrometheusClient | None = None,
         loki: LokiClient | None = None,
         gitlab: GitLabClient | None = None,
+        github: GitHubClient | None = None,
     ) -> None:
         self.prometheus = prometheus or PrometheusClient()
         self.loki = loki or LokiClient()
         self.gitlab = gitlab or GitLabClient()
+        self.github = github or GitHubClient()
 
     def tools(self) -> list[SimpleTool]:
         return [
@@ -34,6 +36,24 @@ class RealOpsToolset:
                 description="Query real GitLab deployment records for the service project.",
                 handler=self.query_deployments,
                 parameters_schema=_deployment_schema(),
+            ),
+            SimpleTool(
+                name="query_recent_commits",
+                description="Query recent GitHub commits for code changes near the incident window.",
+                handler=self.query_recent_commits,
+                parameters_schema=_github_commits_schema(),
+            ),
+            SimpleTool(
+                name="query_commit_detail",
+                description="Query GitHub commit details and changed files for one commit SHA.",
+                handler=self.query_commit_detail,
+                parameters_schema=_github_commit_schema(),
+            ),
+            SimpleTool(
+                name="read_repository_file",
+                description="Read a file or directory listing from the configured GitHub repository.",
+                handler=self.read_repository_file,
+                parameters_schema=_github_file_schema(),
             ),
             SimpleTool(
                 name="query_service_topology",
@@ -85,6 +105,47 @@ class RealOpsToolset:
             "summary": f"Queried GitLab deployments for {service}.",
         }
 
+    async def query_recent_commits(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        service = _normalize_service(arguments.get("service"))
+        limit = int(arguments.get("limit") or 10)
+        path = arguments.get("path")
+        since = arguments.get("since")
+        return {
+            "service": service,
+            "provider": "github",
+            **await self.github.list_commits(path=path, since=since, limit=limit),
+            "summary": f"Queried GitHub commits for {service}.",
+        }
+
+    async def query_commit_detail(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        sha = str(arguments.get("sha") or "").strip()
+        if not sha:
+            raise ValueError("sha is required for query_commit_detail.")
+        return {
+            "provider": "github",
+            **await self.github.get_commit(sha=sha),
+            "summary": f"Queried GitHub commit detail for {sha}.",
+        }
+
+    async def read_repository_file(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        path = str(arguments.get("path") or "").strip()
+        if not path:
+            raise ValueError("path is required for read_repository_file.")
+        max_chars = int(arguments.get("max_chars") or 4000)
+        result = await self.github.get_file(path=path, ref=arguments.get("ref"))
+        content = result.get("content")
+        if isinstance(content, str) and len(content) > max_chars:
+            result["content"] = content[:max_chars]
+            result["truncated"] = True
+            result["original_length"] = len(content)
+        else:
+            result["truncated"] = False
+        return {
+            "provider": "github",
+            **result,
+            "summary": f"Read GitHub repository path {path}.",
+        }
+
     async def query_service_topology(self, arguments: dict[str, Any]) -> dict[str, Any]:
         service = _normalize_service(arguments.get("service"))
         return {
@@ -103,11 +164,13 @@ def create_real_ops_tools(
     prometheus: PrometheusClient | None = None,
     loki: LokiClient | None = None,
     gitlab: GitLabClient | None = None,
+    github: GitHubClient | None = None,
 ) -> list[SimpleTool]:
     return RealOpsToolset(
         prometheus=prometheus,
         loki=loki,
         gitlab=gitlab,
+        github=github,
     ).tools()
 
 
@@ -152,3 +215,56 @@ def _deployment_schema() -> dict[str, Any]:
         "default": 10,
     }
     return schema
+
+
+def _github_commits_schema() -> dict[str, Any]:
+    schema = _service_window_schema()
+    schema["properties"]["path"] = {
+        "type": "string",
+        "description": "Optional repository path to filter commits, for example app/api/chat.py.",
+    }
+    schema["properties"]["since"] = {
+        "type": "string",
+        "description": "Optional ISO-8601 timestamp to filter commits since that time.",
+    }
+    schema["properties"]["limit"] = {
+        "type": "integer",
+        "description": "Maximum commits to fetch.",
+        "default": 10,
+    }
+    return schema
+
+
+def _github_commit_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "sha": {
+                "type": "string",
+                "description": "GitHub commit SHA.",
+            }
+        },
+        "required": ["sha"],
+    }
+
+
+def _github_file_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Repository file or directory path.",
+            },
+            "ref": {
+                "type": "string",
+                "description": "Optional branch, tag, or commit SHA.",
+            },
+            "max_chars": {
+                "type": "integer",
+                "description": "Maximum content characters to return for files.",
+                "default": 4000,
+            },
+        },
+        "required": ["path"],
+    }

@@ -15,6 +15,7 @@ from app.config import settings
 from app.llm import create_llm_client
 from app.rag import KnowledgeBase, create_embedding_model
 from app.schemas import ChatMessage, MessageRole
+from app.tools import GitHubClient
 
 ACTIVE_TIMEOUT_SECONDS = 10
 
@@ -241,18 +242,12 @@ async def _check_github() -> CheckResult:
     if not settings.github_token:
         return CheckResult("github", "SKIP", "GITHUB_TOKEN is empty")
 
-    url = f"https://api.github.com/repos/{settings.github_repo}/commits/{settings.github_branch}"
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {settings.github_token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    async with httpx.AsyncClient(timeout=_active_timeout(settings.github_timeout_seconds)) as client:
-        response = await client.get(url, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-
-    sha = str(data.get("sha", ""))[:12]
+    client = GitHubClient(timeout_seconds=int(_active_timeout(settings.github_timeout_seconds)))
+    data = await client.list_commits(limit=1)
+    commits = data.get("commits", [])
+    if not commits:
+        return CheckResult("github", "FAIL", "GitHub returned no commits")
+    sha = str(commits[0].get("sha", ""))[:12]
     return CheckResult("github", "PASS", f"{settings.github_repo}@{settings.github_branch} latest sha={sha}")
 
 

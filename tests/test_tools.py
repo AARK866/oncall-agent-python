@@ -1,7 +1,11 @@
 import asyncio
+import base64
+
+import httpx
 
 from app.schemas import ToolCall
 from app.tools import (
+    GitHubClient,
     ToolRegistry,
     create_mock_ops_registry,
     create_ops_connector,
@@ -63,10 +67,13 @@ def test_real_ops_connector_registers_expected_tools() -> None:
     assert registry.mode == "real"
     assert registry.connector_name == "real_ops"
     assert registry.list_tools() == [
+        "query_commit_detail",
         "query_deployments",
         "query_logs",
         "query_metrics",
+        "query_recent_commits",
         "query_service_topology",
+        "read_repository_file",
     ]
 
 
@@ -110,3 +117,68 @@ def test_ops_tool_health_reports_real_missing_config() -> None:
     }
     assert "PROMETHEUS_BASE_URL" in missing
     assert "LOKI_BASE_URL" in missing
+
+
+def test_github_client_lists_commits() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/repos/acme/service/commits"
+        assert request.headers["Authorization"] == "Bearer test-token"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "sha": "abc123",
+                    "html_url": "https://github.com/acme/service/commit/abc123",
+                    "commit": {
+                        "message": "Fix payment timeout",
+                        "author": {"name": "Ada", "email": "ada@example.com", "date": "2026-07-04T00:00:00Z"},
+                        "committer": {"name": "Ada", "email": "ada@example.com", "date": "2026-07-04T00:00:00Z"},
+                    },
+                }
+            ],
+        )
+
+    client = GitHubClient(
+        base_url="https://api.github.test",
+        token="test-token",
+        repo="acme/service",
+        branch="main",
+        transport=httpx.MockTransport(handler),
+    )
+
+    data = asyncio.run(client.list_commits(limit=1))
+
+    assert data["repo"] == "acme/service"
+    assert data["commits"][0]["sha"] == "abc123"
+    assert data["commits"][0]["message"] == "Fix payment timeout"
+
+
+def test_github_client_reads_repository_file() -> None:
+    encoded = base64.b64encode(b"print('hello')").decode("ascii")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/repos/acme/service/contents/app/main.py"
+        return httpx.Response(
+            200,
+            json={
+                "type": "file",
+                "path": "app/main.py",
+                "sha": "file-sha",
+                "size": 14,
+                "encoding": "base64",
+                "content": encoded,
+            },
+        )
+
+    client = GitHubClient(
+        base_url="https://api.github.test",
+        token="test-token",
+        repo="acme/service",
+        branch="main",
+        transport=httpx.MockTransport(handler),
+    )
+
+    data = asyncio.run(client.get_file("app/main.py"))
+
+    assert data["content"] == "print('hello')"
+    assert data["path"] == "app/main.py"

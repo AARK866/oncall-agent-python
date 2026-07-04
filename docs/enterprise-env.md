@@ -83,13 +83,33 @@ Used by:
 - `/api/knowledge/search`
 - `/api/chat` when routed to knowledge mode
 
+## 4. Real GitHub
+
+Use GitHub as a code and change evidence source:
+
+```env
+GITHUB_BASE_URL=https://api.github.com
+GITHUB_TOKEN=your_github_token
+GITHUB_REPO=AARK866/oncall-agent-python
+GITHUB_BRANCH=main
+GITHUB_TIMEOUT_SECONDS=10
+```
+
+Used by:
+
+- `query_recent_commits`
+- `query_commit_detail`
+- `read_repository_file`
+- Ops diagnosis in real tool mode
+
 ## Recommended Switch Order
 
 1. Fill `LLM_API_KEY`, set `LLM_PROVIDER=langchain-openai`, run `python scripts/check_llm_client.py`.
 2. Fill `EMBEDDING_API_KEY`, set `EMBEDDING_PROVIDER=langchain-openai`.
 3. Start Milvus, fill `MILVUS_URI`.
 4. Set `KNOWLEDGE_RETRIEVER_MODE=hybrid` and `KNOWLEDGE_VECTOR_STORE=milvus`.
-5. Run the API and test `/api/knowledge/search`.
+5. Fill `GITHUB_TOKEN` and `GITHUB_REPO`.
+6. Run the API and test `/api/knowledge/search`.
 
 ## Stack Check
 

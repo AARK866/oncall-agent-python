@@ -106,9 +106,10 @@ class OpsAgent:
         metrics = result_map.get("query_metrics")
         logs = result_map.get("query_logs")
         deployments = result_map.get("query_deployments")
+        commits = result_map.get("query_recent_commits")
         topology = result_map.get("query_service_topology")
 
-        evidence = self._collect_evidence(metrics, logs, deployments, topology)
+        evidence = self._collect_evidence(metrics, logs, deployments, commits, topology)
         recommendations = self._collect_recommendations(metrics, logs, deployments, topology)
         risks = [
             "回滚、重启、扩容等高风险操作需要人工确认。",
@@ -152,6 +153,7 @@ class OpsAgent:
         metrics: ToolResult | None,
         logs: ToolResult | None,
         deployments: ToolResult | None,
+        commits: ToolResult | None,
         topology: ToolResult | None,
     ) -> list[str]:
         evidence: list[str] = []
@@ -167,6 +169,13 @@ class OpsAgent:
                 latest = deployments_data[0]
                 evidence.append(
                     f"{latest.get('deployed_at')} 发布 {latest.get('version')}：{latest.get('summary')}"
+                )
+        if commits and commits.success:
+            commits_data = commits.data.get("commits", [])
+            if commits_data:
+                latest_commit = commits_data[0]
+                evidence.append(
+                    f"GitHub latest commit {latest_commit.get('sha')}: {latest_commit.get('message')}"
                 )
         if topology and topology.success:
             related_alerts = topology.data.get("related_alerts", [])

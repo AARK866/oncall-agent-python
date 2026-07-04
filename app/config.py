@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     gitlab_project_id: str | None = None
     gitlab_timeout_seconds: int = 10
     github_token: str | None = None
+    github_base_url: str = "https://api.github.com"
     github_repo: str | None = None
     github_branch: str = "main"
     github_timeout_seconds: int = 10

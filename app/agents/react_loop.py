@@ -37,12 +37,18 @@ class ReactLoop:
         return steps
 
     def default_tool_calls(self, service: str) -> list[ToolCall]:
-        return [
+        tool_calls = [
             ToolCall(name="query_metrics", arguments={"service": service, "window": "30m"}),
             ToolCall(name="query_logs", arguments={"service": service, "window": "30m"}),
             ToolCall(name="query_deployments", arguments={"service": service, "window": "1h"}),
             ToolCall(name="query_service_topology", arguments={"service": service}),
         ]
+        if self.tool_registry.get("query_recent_commits") is not None:
+            tool_calls.insert(
+                3,
+                ToolCall(name="query_recent_commits", arguments={"service": service, "limit": 5}),
+            )
+        return tool_calls
 
     async def _act(
         self,
@@ -70,6 +76,7 @@ class ReactLoop:
             "query_metrics": f"Check {service} metrics first to confirm error rate, latency, and resource pressure.",
             "query_logs": "Inspect logs in the same time window to find direct error signals.",
             "query_deployments": "Check recent deployments because incidents often correlate with change windows.",
+            "query_recent_commits": "Inspect recent GitHub commits because incidents often correlate with code changes.",
             "query_service_topology": "Inspect upstream and downstream dependencies for related alerts.",
         }
         return thoughts.get(tool_name, f"Run {tool_name} because it may provide useful incident evidence.")
@@ -93,6 +100,10 @@ class ReactLoop:
         deployments = result_map.get("query_deployments")
         if deployments and deployments.data.get("deployments"):
             clues.append("there was a recent deployment near the incident window")
+
+        commits = result_map.get("query_recent_commits")
+        if commits and commits.data.get("commits"):
+            clues.append("there were recent GitHub commits near the incident window")
 
         topology = result_map.get("query_service_topology")
         if topology and topology.data.get("related_alerts"):

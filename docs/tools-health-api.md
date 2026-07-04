@@ -34,9 +34,11 @@ This checks whether real backend settings are present:
 - `LOKI_BASE_URL`
 - `GITLAB_BASE_URL`
 - `GITLAB_PROJECT_ID`
+- `GITHUB_REPO`
 
 `GITLAB_TOKEN` is optional in the health response because some GitLab deployments may expose read-only deployment data differently.
+`GITHUB_TOKEN` is optional for public repositories, but should be set for private repositories and higher rate limits.
 
 ## What It Does Not Do
 
-This endpoint does not call Prometheus, Loki, or GitLab over the network. It only checks local configuration and registered tools.
+This endpoint does not call Prometheus, Loki, GitLab, or GitHub over the network. It only checks local configuration and registered tools.

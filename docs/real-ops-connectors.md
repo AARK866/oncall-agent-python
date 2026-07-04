@@ -5,6 +5,7 @@ The project now has a real connector layer for future production systems:
 - Prometheus: metrics
 - Loki: logs
 - GitLab: deployments
+- GitHub: repository files and commits
 - Topology: placeholder for CMDB, Kubernetes, or service graph
 
 Default mode is still mock:
@@ -24,6 +25,10 @@ LOKI_BASE_URL=http://localhost:3100
 GITLAB_BASE_URL=https://gitlab.example.com
 GITLAB_TOKEN=replace-with-token
 GITLAB_PROJECT_ID=123
+GITHUB_BASE_URL=https://api.github.com
+GITHUB_TOKEN=replace-with-token
+GITHUB_REPO=AARK866/oncall-agent-python
+GITHUB_BRANCH=main
 ```
 
 Then start the API:
@@ -58,4 +63,7 @@ If a required URL or token is missing, the tool result will show a clear configu
 | `query_metrics` | Prometheus `/api/v1/query` |
 | `query_logs` | Loki `/loki/api/v1/query_range` |
 | `query_deployments` | GitLab `/api/v4/projects/{project_id}/deployments` |
+| `query_recent_commits` | GitHub `/repos/{owner}/{repo}/commits` |
+| `query_commit_detail` | GitHub `/repos/{owner}/{repo}/commits/{sha}` |
+| `read_repository_file` | GitHub `/repos/{owner}/{repo}/contents/{path}` |
 | `query_service_topology` | Placeholder for CMDB/Kubernetes/service graph |

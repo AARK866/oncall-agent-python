@@ -51,6 +51,17 @@ def _backends_for_mode(mode: str) -> list[ToolBackendStatus]:
                     "GITLAB_TOKEN": settings.gitlab_token,
                 },
             ),
+            _backend(
+                name="github",
+                required_settings=["GITHUB_REPO"],
+                optional_settings=["GITHUB_TOKEN", "GITHUB_BRANCH", "GITHUB_BASE_URL"],
+                values={
+                    "GITHUB_REPO": settings.github_repo,
+                    "GITHUB_TOKEN": settings.github_token,
+                    "GITHUB_BRANCH": settings.github_branch,
+                    "GITHUB_BASE_URL": settings.github_base_url,
+                },
+            ),
             ToolBackendStatus(
                 name="topology",
                 configured=True,

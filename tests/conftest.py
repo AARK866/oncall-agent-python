@@ -17,3 +17,6 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "gitlab_base_url", None)
     monkeypatch.setattr(settings, "gitlab_token", None)
     monkeypatch.setattr(settings, "gitlab_project_id", None)
+    monkeypatch.setattr(settings, "github_token", None)
+    monkeypatch.setattr(settings, "github_repo", None)
+    monkeypatch.setattr(settings, "github_branch", "main")

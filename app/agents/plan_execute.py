@@ -9,7 +9,7 @@ class PlanExecuteReplan:
         self.tool_registry = tool_registry
 
     def plan(self, service: str) -> list[PlanStep]:
-        return [
+        steps = [
             PlanStep(
                 step_id="check_metrics",
                 goal=f"确认 {service} 的错误率、延迟和资源指标。",
@@ -31,6 +31,16 @@ class PlanExecuteReplan:
                 tool_call=ToolCall(name="query_service_topology", arguments={"service": service}),
             ),
         ]
+        if self.tool_registry.get("query_recent_commits") is not None:
+            steps.insert(
+                3,
+                PlanStep(
+                    step_id="check_recent_commits",
+                    goal="Check recent GitHub commits and code changes around the incident window.",
+                    tool_call=ToolCall(name="query_recent_commits", arguments={"service": service, "limit": 5}),
+                ),
+            )
+        return steps
 
     async def run(self, service: str) -> PlanTrace:
         trace = PlanTrace(plan=self.plan(service))
@@ -64,6 +74,9 @@ class PlanExecuteReplan:
 
         if latest.step_id == "check_deployments" and observation.data.get("deployments"):
             return "发现异常前后存在发布记录，最终建议中应包含回滚评估。"
+
+        if latest.step_id == "check_recent_commits" and observation.data.get("commits"):
+            return "Recent GitHub commits were found; include code changes in the diagnosis."
 
         if latest.step_id == "check_topology" and observation.data.get("related_alerts"):
             return "发现相邻依赖告警，最终建议中应同步联系依赖服务负责人。"
