@@ -7,7 +7,16 @@ from app.agents.knowledge_agent import KnowledgeAgent
 from app.agents.llm_ops_assistant import LLMOpsAssistant
 from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
-from app.schemas import ChatMode, ChatResponse, DiagnosisReport, PlanTrace, ReactStep, ToolCall, ToolResult
+from app.schemas import (
+    AlertSeverity,
+    ChatMode,
+    ChatResponse,
+    DiagnosisReport,
+    PlanTrace,
+    ReactStep,
+    ToolCall,
+    ToolResult,
+)
 from app.tools import ToolRegistry
 
 
@@ -16,6 +25,9 @@ class OpsGraphState:
     question: str
     session_id: str
     requested_service: str | None = None
+    alert_severity: AlertSeverity | None = None
+    alert_labels: dict[str, str] = field(default_factory=dict)
+    trigger_metadata: dict[str, Any] = field(default_factory=dict)
     service: str | None = None
     plan_trace: PlanTrace | None = None
     selected_tool_calls: list[ToolCall] = field(default_factory=list)
@@ -45,7 +57,10 @@ class OpsGraphWorkflow:
         infer_service: Callable[[str], str],
         build_report: Callable[[str, list[ToolResult], str], DiagnosisReport],
         format_report: Callable[[DiagnosisReport], str],
-        persist_analysis: Callable[[str, str, str, ChatResponse], None],
+        persist_analysis: Callable[
+            [str, str, str, ChatResponse, AlertSeverity | None, dict[str, str] | None],
+            None,
+        ],
         graph_runtime: str = "local",
     ) -> None:
         self.tool_registry = tool_registry
@@ -64,11 +79,17 @@ class OpsGraphWorkflow:
         question: str,
         session_id: str = "default",
         service: str | None = None,
+        alert_severity: AlertSeverity | None = None,
+        alert_labels: dict[str, str] | None = None,
+        trigger_metadata: dict[str, Any] | None = None,
     ) -> ChatResponse:
         state = OpsGraphState(
             question=question,
             session_id=session_id,
             requested_service=service,
+            alert_severity=alert_severity,
+            alert_labels=alert_labels or {},
+            trigger_metadata=trigger_metadata or {},
         )
         nodes = self._nodes()
         state.graph_trace = [name for name, _ in nodes]
@@ -240,6 +261,7 @@ class OpsGraphWorkflow:
                 "tool_connector": self.tool_registry.describe(),
                 "llm_tool_selection": state.tool_selection_metadata,
                 "llm_summary": state.summary_metadata,
+                "trigger": state.trigger_metadata,
                 "graph_trace": state.graph_trace,
                 "graph_runtime": {
                     "requested": self.graph_runtime,
@@ -259,6 +281,8 @@ class OpsGraphWorkflow:
             state.session_id,
             self._service(state),
             state.response,
+            state.alert_severity,
+            state.alert_labels,
         )
 
     def _service(self, state: OpsGraphState) -> str:

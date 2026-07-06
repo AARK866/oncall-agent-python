@@ -10,6 +10,7 @@ python scripts/check_llm_client.py
 python scripts/check_enterprise_stack.py
 python scripts/check_real_incident_flow.py --mock-llm
 python scripts/check_real_api_flow.py --in-process --mock-llm
+python scripts/check_alert_webhook.py --in-process --mock-llm
 .\.venv\Scripts\python.exe -m pytest
 ```
 
@@ -25,3 +26,4 @@ Docs:
 - Knowledge API: `docs/knowledge-api.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
 - Tools health API: `docs/tools-health-api.md`
+- Alert webhook: `docs/alert-webhook.md`

@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatMode(str, Enum):
@@ -105,6 +105,13 @@ class ChatResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class AlertTriggerResponse(BaseModel):
+    received: int
+    processed: int
+    results: list[ChatResponse] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class AlertAnalyzeRequest(BaseModel):
     alert_id: str
     title: str
@@ -113,6 +120,32 @@ class AlertAnalyzeRequest(BaseModel):
     start_time: datetime | None = None
     labels: dict[str, str] = Field(default_factory=dict)
     annotations: dict[str, str] = Field(default_factory=dict)
+
+
+class AlertmanagerAlert(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: str = Field(default="firing")
+    labels: dict[str, str] = Field(default_factory=dict)
+    annotations: dict[str, str] = Field(default_factory=dict)
+    starts_at: datetime | None = Field(default=None, alias="startsAt")
+    ends_at: datetime | None = Field(default=None, alias="endsAt")
+    generator_url: str | None = Field(default=None, alias="generatorURL")
+    fingerprint: str | None = None
+
+
+class AlertmanagerWebhookRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    version: str | None = None
+    group_key: str | None = Field(default=None, alias="groupKey")
+    status: str | None = None
+    receiver: str | None = None
+    group_labels: dict[str, str] = Field(default_factory=dict, alias="groupLabels")
+    common_labels: dict[str, str] = Field(default_factory=dict, alias="commonLabels")
+    common_annotations: dict[str, str] = Field(default_factory=dict, alias="commonAnnotations")
+    external_url: str | None = Field(default=None, alias="externalURL")
+    alerts: list[AlertmanagerAlert] = Field(default_factory=list)
 
 
 class ToolCall(BaseModel):
