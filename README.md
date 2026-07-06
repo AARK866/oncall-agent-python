@@ -9,6 +9,7 @@ python -m uvicorn app.main:app --reload
 python scripts/check_llm_client.py
 python scripts/check_enterprise_stack.py
 python scripts/check_real_incident_flow.py --mock-llm
+python scripts/check_real_api_flow.py --in-process --mock-llm
 .\.venv\Scripts\python.exe -m pytest
 ```
 

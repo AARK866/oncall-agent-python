@@ -70,6 +70,33 @@ $env:HTTPS_PROXY='http://127.0.0.1:7897'
 the infrastructure check on external LLM connectivity. Remove it when the LLM
 proxy is configured for Python processes.
 
+## Real API Flow Check
+
+Check the FastAPI incident endpoint in-process:
+
+```powershell
+$env:HTTP_PROXY='http://127.0.0.1:7897'
+$env:HTTPS_PROXY='http://127.0.0.1:7897'
+.\.venv\Scripts\python.exe scripts\check_real_api_flow.py --in-process --mock-llm
+```
+
+Check a running API server:
+
+```powershell
+$env:OPS_TOOL_MODE='real'
+$env:HTTP_PROXY='http://127.0.0.1:7897'
+$env:HTTPS_PROXY='http://127.0.0.1:7897'
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+Then in another terminal:
+
+```powershell
+$env:HTTP_PROXY='http://127.0.0.1:7897'
+$env:HTTPS_PROXY='http://127.0.0.1:7897'
+.\.venv\Scripts\python.exe scripts\check_real_api_flow.py
+```
+
 ## Current Tool Mapping
 
 | Agent tool | Real backend |
