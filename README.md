@@ -12,6 +12,7 @@ python scripts/check_real_incident_flow.py --mock-llm
 python scripts/check_real_api_flow.py --in-process --mock-llm
 python scripts/check_alert_webhook.py --in-process --mock-llm
 python scripts/ingest_knowledge.py --source local --path app/data/runbooks
+docker compose up --build api
 .\.venv\Scripts\python.exe -m pytest
 ```
 
@@ -20,6 +21,7 @@ Docs:
 - Architecture: `docs/architecture.md`
 - Integration roadmap: `docs/integration-roadmap.md`
 - Enterprise env: `docs/enterprise-env.md`
+- Deployment and CI/CD: `docs/deployment-ci.md`
 - LLM setup: `docs/llm-setup.md`
 - LangChain real LLM: `docs/langchain-real-llm.md`
 - LangGraph setup: `docs/langgraph-setup.md`
