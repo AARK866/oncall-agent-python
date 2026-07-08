@@ -27,6 +27,7 @@ Docs:
 - Knowledge API: `docs/knowledge-api.md`
 - Knowledge ingestion: `docs/knowledge-ingestion.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
+- Security and production: `docs/security-production.md`
 - Tools health API: `docs/tools-health-api.md`
 - Alert webhook: `docs/alert-webhook.md`
 - Async tasks: `docs/async-tasks.md`

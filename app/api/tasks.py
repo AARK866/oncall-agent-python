@@ -1,9 +1,14 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.schemas import DiagnosisTaskEventRecord, DiagnosisTaskRecord
+from app.security import require_api_token
 from app.tasks import DiagnosisTaskQueue
 
-router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+router = APIRouter(
+    prefix="/api/tasks",
+    tags=["tasks"],
+    dependencies=[Depends(require_api_token)],
+)
 
 
 @router.get("", response_model=list[DiagnosisTaskRecord])

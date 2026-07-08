@@ -6,6 +6,10 @@ class Settings(BaseSettings):
     app_env: str = "local"
     app_version: str = "0.1.0"
     api_prefix: str = "/api"
+    api_auth_enabled: bool = False
+    api_token: str | None = None
+    webhook_secret: str | None = None
+    require_auth_in_production: bool = True
     llm_provider: str = "mock"
     llm_model: str = "mock-oncall-agent"
     llm_api_key: str | None = None

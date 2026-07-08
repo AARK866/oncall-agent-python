@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.schemas import (
     AlertGroupRecord,
@@ -11,6 +11,7 @@ from app.schemas import (
     AlertmanagerAlert,
     AlertmanagerWebhookRequest,
 )
+from app.security import require_api_token, require_webhook_auth
 from app.tasks import DiagnosisTaskQueue, DiagnosisTaskSubmission
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
@@ -24,6 +25,7 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 async def analyze_alert(
     request: AlertAnalyzeRequest,
     background_tasks: BackgroundTasks,
+    _: None = Depends(require_api_token),
 ) -> AlertTriggerResponse:
     labels = dict(request.labels)
     labels.setdefault("service", request.service)
@@ -78,6 +80,7 @@ async def analyze_alert(
 async def receive_alertmanager_webhook(
     request: AlertmanagerWebhookRequest,
     background_tasks: BackgroundTasks,
+    _: None = Depends(require_webhook_auth),
 ) -> AlertTriggerResponse:
     queue = DiagnosisTaskQueue()
     submissions: list[DiagnosisTaskSubmission] = []
@@ -157,14 +160,18 @@ async def receive_alertmanager_webhook(
 
 
 @router.get("/groups", response_model=list[AlertGroupRecord])
-async def list_alert_groups(limit: int = 20) -> list[AlertGroupRecord]:
+async def list_alert_groups(
+    limit: int = 20,
+    _: None = Depends(require_api_token),
+) -> list[AlertGroupRecord]:
     return DiagnosisTaskQueue().list_alert_groups(limit=limit)
 
 
 @router.get("/groups/{group_id}", response_model=AlertGroupRecord)
-async def get_alert_group(group_id: str) -> AlertGroupRecord:
-    from fastapi import HTTPException
-
+async def get_alert_group(
+    group_id: str,
+    _: None = Depends(require_api_token),
+) -> AlertGroupRecord:
     group = DiagnosisTaskQueue().get_alert_group(group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Alert group not found")

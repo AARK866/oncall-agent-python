@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+import hashlib
+import hmac
 import json
 import sys
 from pathlib import Path
@@ -17,13 +19,15 @@ from app.config import settings
 
 async def main() -> int:
     args = _parse_args()
+    if args.webhook_secret:
+        settings.webhook_secret = args.webhook_secret
     if args.in_process:
         _apply_in_process_overrides(args)
 
     fingerprint = args.fingerprint or f"demo-payment-5xx-{uuid4().hex}"
     payload = _sample_alertmanager_payload(args.service, args.severity, fingerprint)
     async with _api_client(args) as client:
-        response = await _post_json(client, "/api/alerts/alertmanager", payload)
+        response = await _post_alertmanager(client, payload)
         task = await _wait_for_first_task(client, response, args.poll_attempts, args.poll_interval)
         events = await _get_first_task_events(client, response)
 
@@ -42,6 +46,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--in-process", action="store_true", help="Call the FastAPI app in-process through ASGI.")
     parser.add_argument("--mock-llm", action="store_true", help="Use MockLLM in --in-process mode.")
     parser.add_argument("--real-tools", action="store_true", help="Use real ops tools in --in-process mode.")
+    parser.add_argument("--webhook-secret", help="Set WEBHOOK_SECRET and sign the sample webhook request.")
     parser.add_argument("--poll-attempts", type=int, default=20, help="Task polling attempts.")
     parser.add_argument("--poll-interval", type=float, default=1.0, help="Seconds between task polling attempts.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
@@ -76,6 +81,24 @@ def _api_client(args: argparse.Namespace) -> httpx.AsyncClient:
 
 async def _post_json(client: httpx.AsyncClient, path: str, payload: dict[str, Any]) -> dict[str, Any]:
     response = await client.post(path, json=payload)
+    response.raise_for_status()
+    return response.json()
+
+
+async def _post_alertmanager(client: httpx.AsyncClient, payload: dict[str, Any]) -> dict[str, Any]:
+    if not settings.webhook_secret:
+        return await _post_json(client, "/api/alerts/alertmanager", payload)
+
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    signature = hmac.new(settings.webhook_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    response = await client.post(
+        "/api/alerts/alertmanager",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-OnCall-Signature": f"sha256={signature}",
+        },
+    )
     response.raise_for_status()
     return response.json()
 

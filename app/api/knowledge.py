@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import settings
 from app.rag import KnowledgeBase
@@ -12,6 +12,7 @@ from app.schemas import (
     KnowledgeSearchResponse,
     KnowledgeStatsResponse,
 )
+from app.security import require_api_token
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
@@ -68,7 +69,10 @@ async def search_knowledge(request: KnowledgeSearchRequest) -> KnowledgeSearchRe
 
 
 @router.post("/ingest", response_model=KnowledgeIngestResponse)
-async def ingest_knowledge(request: KnowledgeIngestRequest) -> KnowledgeIngestResponse:
+async def ingest_knowledge(
+    request: KnowledgeIngestRequest,
+    _: None = Depends(require_api_token),
+) -> KnowledgeIngestResponse:
     return await KnowledgeIngestionPipeline().ingest(
         source=request.source,
         path=request.path,

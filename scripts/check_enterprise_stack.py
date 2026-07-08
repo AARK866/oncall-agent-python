@@ -15,6 +15,7 @@ from app.config import settings
 from app.llm import create_llm_client
 from app.rag import KnowledgeBase, create_embedding_model
 from app.schemas import ChatMessage, MessageRole
+from app.security import redact_text, validate_production_security
 from app.tools import GitHubClient
 
 ACTIVE_TIMEOUT_SECONDS = 10
@@ -110,7 +111,7 @@ async def _safe_check(
 
 
 async def _check_config() -> CheckResult:
-    missing: list[str] = []
+    missing: list[str] = validate_production_security()
 
     if settings.llm_provider.lower().strip() not in {"mock", "local"} and not settings.llm_api_key:
         missing.append("LLM_API_KEY")
@@ -252,17 +253,7 @@ async def _check_github() -> CheckResult:
 
 
 def _redact(text: str) -> str:
-    redacted = text
-    for secret in [
-        settings.llm_api_key,
-        settings.embedding_api_key,
-        settings.github_token,
-        settings.gitlab_token,
-        settings.milvus_token,
-    ]:
-        if secret:
-            redacted = redacted.replace(secret, "***")
-    return redacted
+    return redact_text(text)
 
 
 def _dependency_skip(name: str, results_by_name: dict[str, CheckResult]) -> CheckResult | None:
