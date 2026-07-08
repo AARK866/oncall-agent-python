@@ -1,5 +1,11 @@
-from app.schemas import ChatMode, ChatResponse, SourceDocument
-from app.storage import SQLiteIncidentStore
+from app.schemas import (
+    AlertSeverity,
+    ChatMode,
+    ChatResponse,
+    DiagnosisTaskEventType,
+    SourceDocument,
+)
+from app.storage import SQLiteIncidentStore, SQLiteTaskStore
 
 
 def test_sqlite_incident_store_saves_incident_and_diagnosis(tmp_path) -> None:
@@ -41,3 +47,44 @@ def test_sqlite_incident_store_saves_incident_and_diagnosis(tmp_path) -> None:
     assert latest_diagnosis.diagnosis_id == diagnosis.diagnosis_id
     assert latest_diagnosis.sources[0].title == "Payment runbook"
     assert store.list_incidents()[0].incident_id == incident.incident_id
+
+
+def test_sqlite_task_store_records_task_events(tmp_path) -> None:
+    store = SQLiteTaskStore(tmp_path / "tasks.db")
+    task = store.create_task(
+        source="alertmanager",
+        question="payment service 5xx is high",
+        session_id="task-storage-test",
+        service="payment-api",
+        severity=AlertSeverity.critical,
+    )
+
+    store.mark_running(task.task_id)
+    store.append_event(
+        task_id=task.task_id,
+        event_type=DiagnosisTaskEventType.tool_result,
+        message="Tool query_metrics succeeded.",
+        data={"tool_name": "query_metrics", "success": True},
+    )
+    response = ChatResponse(
+        session_id="task-storage-test",
+        answer="diagnosis",
+        mode=ChatMode.ops,
+        metadata={
+            "incident_id": "inc_test",
+            "diagnosis_id": "diag_test",
+        },
+    )
+    store.mark_succeeded(task.task_id, response)
+
+    loaded_task = store.require_task(task.task_id)
+    events = store.list_events(task.task_id)
+
+    assert loaded_task.status == "succeeded"
+    assert loaded_task.incident_id == "inc_test"
+    assert [event.event_type for event in events] == [
+        DiagnosisTaskEventType.queued,
+        DiagnosisTaskEventType.running,
+        DiagnosisTaskEventType.tool_result,
+        DiagnosisTaskEventType.succeeded,
+    ]

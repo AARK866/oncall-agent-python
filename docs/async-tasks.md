@@ -58,12 +58,28 @@ Get one task:
 GET /api/tasks/{task_id}
 ```
 
+Get task progress events:
+
+```http
+GET /api/tasks/{task_id}/events
+```
+
 Task statuses:
 
 - `queued`: accepted but not started
 - `running`: background worker is executing the diagnosis
 - `succeeded`: diagnosis completed and result is stored
 - `failed`: diagnosis failed and `error` contains the failure message
+
+Progress event types:
+
+- `queued`: task accepted by the API
+- `running`: background runner started
+- `tool_result`: an ops tool finished, such as Prometheus, Loki, GitHub, or topology
+- `retrieved_docs`: runbook retrieval finished
+- `incident_persisted`: incident and diagnosis records were written
+- `succeeded`: task finished successfully
+- `failed`: task failed
 
 ## Current Implementation
 

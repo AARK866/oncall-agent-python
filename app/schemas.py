@@ -37,6 +37,16 @@ class DiagnosisTaskStatus(str, Enum):
     failed = "failed"
 
 
+class DiagnosisTaskEventType(str, Enum):
+    queued = "queued"
+    running = "running"
+    tool_result = "tool_result"
+    retrieved_docs = "retrieved_docs"
+    incident_persisted = "incident_persisted"
+    succeeded = "succeeded"
+    failed = "failed"
+
+
 class AgentEventType(str, Enum):
     thinking = "thinking"
     tool_call = "tool_call"
@@ -130,6 +140,15 @@ class DiagnosisTaskRecord(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+class DiagnosisTaskEventRecord(BaseModel):
+    event_id: str
+    task_id: str
+    event_type: DiagnosisTaskEventType
+    message: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class AlertTriggerResponse(BaseModel):

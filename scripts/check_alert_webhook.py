@@ -23,9 +23,10 @@ async def main() -> int:
     async with _api_client(args) as client:
         response = await _post_json(client, "/api/alerts/alertmanager", payload)
         task = await _wait_for_first_task(client, response, args.poll_attempts, args.poll_interval)
+        events = await _get_first_task_events(client, response)
 
-    summary = _summarize_response(response, task)
-    _print_summary(summary, response, task, args.json)
+    summary = _summarize_response(response, task, events)
+    _print_summary(summary, response, task, events, args.json)
     return 0 if _is_success(summary) else 1
 
 
@@ -102,6 +103,16 @@ async def _wait_for_first_task(
     return task
 
 
+async def _get_first_task_events(
+    client: httpx.AsyncClient,
+    webhook_response: dict[str, Any],
+) -> list[dict[str, Any]]:
+    tasks = webhook_response.get("tasks") or []
+    if not tasks:
+        return []
+    return await _get_json(client, f"/api/tasks/{tasks[0]['task_id']}/events")
+
+
 def _sample_alertmanager_payload(service: str, severity: str) -> dict[str, Any]:
     return {
         "version": "4",
@@ -131,7 +142,11 @@ def _sample_alertmanager_payload(service: str, severity: str) -> dict[str, Any]:
     }
 
 
-def _summarize_response(response: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+def _summarize_response(
+    response: dict[str, Any],
+    task: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
     first_result = task.get("result") or {}
     metadata = first_result.get("metadata", {})
     trigger = metadata.get("trigger", {})
@@ -151,6 +166,8 @@ def _summarize_response(response: dict[str, Any], task: dict[str, Any]) -> dict[
         "runbook_retrieved_count": metadata.get("runbook_retrieved_count", 0),
         "incident_id": metadata.get("incident_id"),
         "answer_present": bool(first_result.get("answer")),
+        "event_count": len(events),
+        "event_types": [event.get("event_type") for event in events],
     }
 
 
@@ -162,6 +179,7 @@ def _is_success(summary: dict[str, Any]) -> bool:
         and summary["mode"] == "ops"
         and summary["trigger_source"] == "alertmanager"
         and summary["answer_present"] is True
+        and "succeeded" in summary["event_types"]
     )
 
 
@@ -169,10 +187,17 @@ def _print_summary(
     summary: dict[str, Any],
     response: dict[str, Any],
     task: dict[str, Any],
+    events: list[dict[str, Any]],
     as_json: bool,
 ) -> None:
     if as_json:
-        print(json.dumps({"summary": summary, "response": response, "task": task}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"summary": summary, "response": response, "task": task, "events": events},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return
 
     print("Alert webhook check")
@@ -186,6 +211,8 @@ def _print_summary(
     print(f"- connector: {summary['connector_name']} ({summary['connector_mode']})")
     print(f"- runbook_retrieved_count: {summary['runbook_retrieved_count']}")
     print(f"- incident_id: {summary['incident_id']}")
+    print(f"- event_count: {summary['event_count']}")
+    print(f"- event_types: {', '.join(str(item) for item in summary['event_types'])}")
     print("")
     print("Answer preview")
     result = task.get("result") or {}

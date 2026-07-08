@@ -40,6 +40,14 @@ def test_alert_analyze_endpoint_triggers_ops_diagnosis() -> None:
     assert result["metadata"]["trigger"]["source"] == "api_alert"
     assert result["metadata"]["trigger"]["severity"] == "critical"
 
+    event_types = _get_task_event_types(task["task_id"])
+    assert event_types[0] == "queued"
+    assert "running" in event_types
+    assert "tool_result" in event_types
+    assert "retrieved_docs" in event_types
+    assert "incident_persisted" in event_types
+    assert event_types[-1] == "succeeded"
+
 
 def test_alertmanager_webhook_processes_only_firing_alerts() -> None:
     response = client.post(
@@ -121,7 +129,19 @@ def test_task_endpoint_returns_404_for_missing_task() -> None:
     assert response.status_code == 404
 
 
+def test_task_events_endpoint_returns_404_for_missing_task() -> None:
+    response = client.get("/api/tasks/task_missing/events")
+
+    assert response.status_code == 404
+
+
 def _get_task(task_id: str) -> dict:
     response = client.get(f"/api/tasks/{task_id}")
     assert response.status_code == 200
     return response.json()
+
+
+def _get_task_event_types(task_id: str) -> list[str]:
+    response = client.get(f"/api/tasks/{task_id}/events")
+    assert response.status_code == 200
+    return [event["event_type"] for event in response.json()]

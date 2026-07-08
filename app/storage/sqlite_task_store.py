@@ -6,7 +6,14 @@ from typing import Any
 from uuid import uuid4
 
 from app.config import settings
-from app.schemas import AlertSeverity, ChatResponse, DiagnosisTaskRecord, DiagnosisTaskStatus
+from app.schemas import (
+    AlertSeverity,
+    ChatResponse,
+    DiagnosisTaskEventRecord,
+    DiagnosisTaskEventType,
+    DiagnosisTaskRecord,
+    DiagnosisTaskStatus,
+)
 
 
 class SQLiteTaskStore:
@@ -59,6 +66,16 @@ class SQLiteTaskStore:
                 _task_values(task),
             )
 
+        self.append_event(
+            task_id=task.task_id,
+            event_type=DiagnosisTaskEventType.queued,
+            message="Diagnosis task accepted.",
+            data={
+                "source": source,
+                "service": service,
+                "severity": severity.value,
+            },
+        )
         return task
 
     def mark_running(self, task_id: str) -> DiagnosisTaskRecord:
@@ -77,6 +94,11 @@ class SQLiteTaskStore:
                     task_id,
                 ),
             )
+        self.append_event(
+            task_id=task_id,
+            event_type=DiagnosisTaskEventType.running,
+            message="Diagnosis task started.",
+        )
         return self.require_task(task_id)
 
     def mark_succeeded(self, task_id: str, response: ChatResponse) -> DiagnosisTaskRecord:
@@ -99,6 +121,15 @@ class SQLiteTaskStore:
                     task_id,
                 ),
             )
+        self.append_event(
+            task_id=task_id,
+            event_type=DiagnosisTaskEventType.succeeded,
+            message="Diagnosis task completed successfully.",
+            data={
+                "incident_id": response.metadata.get("incident_id"),
+                "diagnosis_id": response.metadata.get("diagnosis_id"),
+            },
+        )
         return self.require_task(task_id)
 
     def mark_failed(self, task_id: str, error: str) -> DiagnosisTaskRecord:
@@ -118,7 +149,40 @@ class SQLiteTaskStore:
                     task_id,
                 ),
             )
+        self.append_event(
+            task_id=task_id,
+            event_type=DiagnosisTaskEventType.failed,
+            message="Diagnosis task failed.",
+            data={"error": error[:4000]},
+        )
         return self.require_task(task_id)
+
+    def append_event(
+        self,
+        task_id: str,
+        event_type: DiagnosisTaskEventType,
+        message: str,
+        data: dict[str, Any] | None = None,
+    ) -> DiagnosisTaskEventRecord:
+        event = DiagnosisTaskEventRecord(
+            event_id=f"event_{uuid4().hex}",
+            task_id=task_id,
+            event_type=event_type,
+            message=message,
+            data=data or {},
+            created_at=datetime.utcnow(),
+        )
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO diagnosis_task_events (
+                    event_id, task_id, event_type, message, data_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                _event_values(event),
+            )
+        return event
 
     def get_task(self, task_id: str) -> DiagnosisTaskRecord | None:
         with self._connect() as connection:
@@ -146,6 +210,18 @@ class SQLiteTaskStore:
             ).fetchall()
         return [_task_from_row(row) for row in rows]
 
+    def list_events(self, task_id: str) -> list[DiagnosisTaskEventRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM diagnosis_task_events
+                WHERE task_id = ?
+                ORDER BY created_at ASC
+                """,
+                (task_id,),
+            ).fetchall()
+        return [_event_from_row(row) for row in rows]
+
     def _init_schema(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -168,6 +244,19 @@ class SQLiteTaskStore:
                     updated_at TEXT NOT NULL,
                     started_at TEXT,
                     finished_at TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS diagnosis_task_events (
+                    event_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    data_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (task_id) REFERENCES diagnosis_tasks (task_id)
                 )
                 """
             )
@@ -200,6 +289,17 @@ def _task_values(task: DiagnosisTaskRecord) -> tuple[Any, ...]:
     )
 
 
+def _event_values(event: DiagnosisTaskEventRecord) -> tuple[Any, ...]:
+    return (
+        event.event_id,
+        event.task_id,
+        event.event_type.value,
+        event.message,
+        _json_dumps(event.data),
+        _datetime_to_text(event.created_at),
+    )
+
+
 def _task_from_row(row: sqlite3.Row) -> DiagnosisTaskRecord:
     result_data = _json_loads(row["result_json"], None)
     return DiagnosisTaskRecord(
@@ -220,6 +320,17 @@ def _task_from_row(row: sqlite3.Row) -> DiagnosisTaskRecord:
         updated_at=_datetime_from_text(row["updated_at"]),
         started_at=_datetime_from_text(row["started_at"]) if row["started_at"] else None,
         finished_at=_datetime_from_text(row["finished_at"]) if row["finished_at"] else None,
+    )
+
+
+def _event_from_row(row: sqlite3.Row) -> DiagnosisTaskEventRecord:
+    return DiagnosisTaskEventRecord(
+        event_id=row["event_id"],
+        task_id=row["task_id"],
+        event_type=DiagnosisTaskEventType(row["event_type"]),
+        message=row["message"],
+        data=_json_loads(row["data_json"], {}),
+        created_at=_datetime_from_text(row["created_at"]),
     )
 
 
