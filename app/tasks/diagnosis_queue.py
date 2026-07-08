@@ -1,16 +1,28 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from app.agents import OpsAgent
 from app.schemas import (
+    AlertGroupRecord,
+    AlertGroupStatus,
     AlertSeverity,
     ChatResponse,
     DiagnosisTaskEventRecord,
     DiagnosisTaskEventType,
     DiagnosisTaskRecord,
+    DiagnosisTaskStatus,
 )
 from app.storage import SQLiteIncidentStore, SQLiteTaskStore
+
+
+@dataclass(frozen=True)
+class DiagnosisTaskSubmission:
+    task: DiagnosisTaskRecord
+    alert_group: AlertGroupRecord | None = None
+    scheduled: bool = True
+    deduplicated: bool = False
 
 
 class DiagnosisTaskQueue:
@@ -34,6 +46,7 @@ class DiagnosisTaskQueue:
         source: str,
         question: str,
         session_id: str,
+        alert_group_id: str | None = None,
         service: str | None = None,
         severity: AlertSeverity = AlertSeverity.warning,
         labels: dict[str, str] | None = None,
@@ -43,11 +56,74 @@ class DiagnosisTaskQueue:
             source=source,
             question=question,
             session_id=session_id,
+            alert_group_id=alert_group_id,
             service=service,
             severity=severity,
             labels=labels,
             trigger_metadata=trigger_metadata,
         )
+
+    def submit_alert(
+        self,
+        dedupe_key: str,
+        source: str,
+        title: str,
+        question: str,
+        session_id: str,
+        service: str | None = None,
+        severity: AlertSeverity = AlertSeverity.warning,
+        labels: dict[str, str] | None = None,
+        annotations: dict[str, str] | None = None,
+        trigger_metadata: dict[str, Any] | None = None,
+    ) -> DiagnosisTaskSubmission:
+        existing_group = self.task_store.get_alert_group_by_dedupe_key(dedupe_key)
+        group = self.task_store.upsert_alert_group(
+            dedupe_key=dedupe_key,
+            source=source,
+            title=title,
+            service=service,
+            severity=severity,
+            labels=labels,
+            annotations=annotations,
+        )
+
+        if existing_group and existing_group.status == AlertGroupStatus.active:
+            latest_task = (
+                self.task_store.get_task(existing_group.latest_task_id)
+                if existing_group.latest_task_id
+                else None
+            )
+            if latest_task and latest_task.status != DiagnosisTaskStatus.failed:
+                return DiagnosisTaskSubmission(
+                    task=latest_task,
+                    alert_group=group,
+                    scheduled=False,
+                    deduplicated=True,
+                )
+
+        metadata = dict(trigger_metadata or {})
+        metadata["alert_group_id"] = group.group_id
+        metadata["dedupe_key"] = dedupe_key
+        task = self.submit(
+            source=source,
+            question=question,
+            session_id=session_id,
+            alert_group_id=group.group_id,
+            service=service,
+            severity=severity,
+            labels=labels,
+            trigger_metadata=metadata,
+        )
+        group = self.task_store.attach_task_to_alert_group(group.group_id, task.task_id)
+        return DiagnosisTaskSubmission(
+            task=task,
+            alert_group=group,
+            scheduled=True,
+            deduplicated=False,
+        )
+
+    def resolve_alert(self, dedupe_key: str) -> AlertGroupRecord | None:
+        return self.task_store.resolve_alert_group(dedupe_key)
 
     async def run(self, task_id: str) -> None:
         task = self.task_store.mark_running(task_id)
@@ -66,6 +142,8 @@ class DiagnosisTaskQueue:
 
         self._record_response_events(task_id, response)
         self.task_store.mark_succeeded(task_id, response)
+        if task.alert_group_id:
+            self.task_store.mark_alert_group_diagnosed(task.alert_group_id, response)
 
     def get(self, task_id: str) -> DiagnosisTaskRecord | None:
         return self.task_store.get_task(task_id)
@@ -75,6 +153,12 @@ class DiagnosisTaskQueue:
 
     def events(self, task_id: str) -> list[DiagnosisTaskEventRecord]:
         return self.task_store.list_events(task_id)
+
+    def get_alert_group(self, group_id: str) -> AlertGroupRecord | None:
+        return self.task_store.get_alert_group(group_id)
+
+    def list_alert_groups(self, limit: int = 20) -> list[AlertGroupRecord]:
+        return self.task_store.list_alert_groups(limit=limit)
 
     def _record_response_events(self, task_id: str, response: ChatResponse) -> None:
         for result in response.metadata.get("tool_results", []):

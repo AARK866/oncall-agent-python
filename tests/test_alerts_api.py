@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -7,10 +9,11 @@ client = TestClient(app)
 
 
 def test_alert_analyze_endpoint_triggers_ops_diagnosis() -> None:
+    alert_id = f"alert-payment-5xx-{uuid4().hex}"
     response = client.post(
         "/api/alerts/analyze",
         json={
-            "alert_id": "alert-payment-5xx",
+            "alert_id": alert_id,
             "title": "High5xxRate",
             "service": "payment-api",
             "severity": "critical",
@@ -97,6 +100,93 @@ def test_alertmanager_webhook_processes_only_firing_alerts() -> None:
     assert result["metadata"]["trigger"]["alert_id"] == "payment-5xx-fingerprint"
 
 
+def test_alertmanager_webhook_deduplicates_repeated_firing_alert() -> None:
+    fingerprint = f"repeated-payment-5xx-{uuid4().hex}"
+    payload = {
+        "version": "4",
+        "groupKey": "{}:{alertname=\"RepeatedHigh5xxRate\"}",
+        "status": "firing",
+        "receiver": "oncall-agent",
+        "commonLabels": {"service": "payment-api", "severity": "critical"},
+        "commonAnnotations": {"summary": "payment-api has repeated elevated 5xx"},
+        "alerts": [
+            {
+                "status": "firing",
+                "labels": {"alertname": "RepeatedHigh5xxRate"},
+                "annotations": {"description": "5xx rate is still above 5%"},
+                "startsAt": "2026-07-06T10:00:00Z",
+                "fingerprint": fingerprint,
+            }
+        ],
+    }
+
+    first_response = client.post("/api/alerts/alertmanager", json=payload)
+    second_response = client.post("/api/alerts/alertmanager", json=payload)
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    first_data = first_response.json()
+    second_data = second_response.json()
+    first_task = _get_task(first_data["tasks"][0]["task_id"])
+    second_task = second_data["tasks"][0]
+
+    assert first_data["metadata"]["scheduled"] == 1
+    assert first_data["metadata"]["deduplicated"] == 0
+    assert second_data["metadata"]["scheduled"] == 0
+    assert second_data["metadata"]["deduplicated"] == 1
+    assert second_task["task_id"] == first_task["task_id"]
+    assert second_task["alert_group_id"] == first_task["alert_group_id"]
+
+    group = _get_alert_group(first_task["alert_group_id"])
+    assert group["trigger_count"] == 2
+    assert group["latest_task_id"] == first_task["task_id"]
+    assert group["status"] == "active"
+
+
+def test_alertmanager_resolved_payload_marks_alert_group_resolved() -> None:
+    fingerprint = f"resolved-after-firing-{uuid4().hex}"
+    payload = {
+        "status": "firing",
+        "receiver": "oncall-agent",
+        "commonLabels": {"service": "payment-api", "severity": "critical"},
+        "alerts": [
+            {
+                "status": "firing",
+                "labels": {"alertname": "ResolvedAfterFiring"},
+                "startsAt": "2026-07-06T10:00:00Z",
+                "fingerprint": fingerprint,
+            }
+        ],
+    }
+    resolved_payload = {
+        "status": "resolved",
+        "receiver": "oncall-agent",
+        "commonLabels": {"service": "payment-api", "severity": "critical"},
+        "alerts": [
+            {
+                "status": "resolved",
+                "labels": {"alertname": "ResolvedAfterFiring"},
+                "startsAt": "2026-07-06T10:00:00Z",
+                "endsAt": "2026-07-06T10:10:00Z",
+                "fingerprint": fingerprint,
+            }
+        ],
+    }
+
+    firing_response = client.post("/api/alerts/alertmanager", json=payload)
+    group_id = _get_task(firing_response.json()["tasks"][0]["task_id"])["alert_group_id"]
+    resolved_response = client.post("/api/alerts/alertmanager", json=resolved_payload)
+
+    assert resolved_response.status_code == 202
+    resolved_data = resolved_response.json()
+    assert resolved_data["processed"] == 0
+    assert resolved_data["metadata"]["resolved"] == 1
+    assert resolved_data["metadata"]["resolved_group_ids"] == [group_id]
+    group = _get_alert_group(group_id)
+    assert group["status"] == "resolved"
+    assert group["trigger_count"] == 2
+
+
 def test_alertmanager_webhook_ignores_resolved_only_payload() -> None:
     response = client.post(
         "/api/alerts/alertmanager",
@@ -135,8 +225,20 @@ def test_task_events_endpoint_returns_404_for_missing_task() -> None:
     assert response.status_code == 404
 
 
+def test_alert_group_endpoint_returns_404_for_missing_group() -> None:
+    response = client.get("/api/alerts/groups/ag_missing")
+
+    assert response.status_code == 404
+
+
 def _get_task(task_id: str) -> dict:
     response = client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    return response.json()
+
+
+def _get_alert_group(group_id: str) -> dict:
+    response = client.get(f"/api/alerts/groups/{group_id}")
     assert response.status_code == 200
     return response.json()
 

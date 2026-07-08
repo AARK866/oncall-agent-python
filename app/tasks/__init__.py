@@ -1,3 +1,3 @@
-from app.tasks.diagnosis_queue import DiagnosisTaskQueue
+from app.tasks.diagnosis_queue import DiagnosisTaskQueue, DiagnosisTaskSubmission
 
-__all__ = ["DiagnosisTaskQueue"]
+__all__ = ["DiagnosisTaskQueue", "DiagnosisTaskSubmission"]

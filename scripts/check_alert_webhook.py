@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 
@@ -19,7 +20,8 @@ async def main() -> int:
     if args.in_process:
         _apply_in_process_overrides(args)
 
-    payload = _sample_alertmanager_payload(args.service, args.severity)
+    fingerprint = args.fingerprint or f"demo-payment-5xx-{uuid4().hex}"
+    payload = _sample_alertmanager_payload(args.service, args.severity, fingerprint)
     async with _api_client(args) as client:
         response = await _post_json(client, "/api/alerts/alertmanager", payload)
         task = await _wait_for_first_task(client, response, args.poll_attempts, args.poll_interval)
@@ -35,6 +37,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Running API base URL.")
     parser.add_argument("--service", default="payment-api", help="Service label used in the sample alert.")
     parser.add_argument("--severity", default="critical", help="Severity label used in the sample alert.")
+    parser.add_argument("--fingerprint", help="Alertmanager fingerprint. Defaults to a unique value.")
     parser.add_argument("--client-timeout", type=int, default=60, help="HTTP client timeout seconds.")
     parser.add_argument("--in-process", action="store_true", help="Call the FastAPI app in-process through ASGI.")
     parser.add_argument("--mock-llm", action="store_true", help="Use MockLLM in --in-process mode.")
@@ -113,7 +116,7 @@ async def _get_first_task_events(
     return await _get_json(client, f"/api/tasks/{tasks[0]['task_id']}/events")
 
 
-def _sample_alertmanager_payload(service: str, severity: str) -> dict[str, Any]:
+def _sample_alertmanager_payload(service: str, severity: str, fingerprint: str) -> dict[str, Any]:
     return {
         "version": "4",
         "groupKey": f'{{}}:{{alertname="High5xxRate", service="{service}"}}',
@@ -136,7 +139,7 @@ def _sample_alertmanager_payload(service: str, severity: str) -> dict[str, Any]:
                 "annotations": {"runbook_url": "app/data/runbooks/payment_5xx.md"},
                 "startsAt": "2026-07-06T10:00:00Z",
                 "generatorURL": "http://localhost:9090/graph",
-                "fingerprint": "demo-payment-5xx",
+                "fingerprint": fingerprint,
             }
         ],
     }
@@ -152,10 +155,15 @@ def _summarize_response(
     trigger = metadata.get("trigger", {})
     tool_connector = metadata.get("tool_connector", {})
     submitted_tasks = response.get("tasks", [])
+    response_metadata = response.get("metadata", {})
     return {
         "received": response.get("received"),
         "processed": response.get("processed"),
+        "scheduled": response_metadata.get("scheduled"),
+        "deduplicated": response_metadata.get("deduplicated"),
+        "alert_group_ids": response_metadata.get("alert_group_ids", []),
         "submitted_task_id": submitted_tasks[0].get("task_id") if submitted_tasks else None,
+        "submitted_alert_group_id": submitted_tasks[0].get("alert_group_id") if submitted_tasks else None,
         "task_status": task.get("status"),
         "mode": first_result.get("mode"),
         "service": metadata.get("service"),
@@ -203,7 +211,11 @@ def _print_summary(
     print("Alert webhook check")
     print(f"- received: {summary['received']}")
     print(f"- processed: {summary['processed']}")
+    print(f"- scheduled: {summary['scheduled']}")
+    print(f"- deduplicated: {summary['deduplicated']}")
+    print(f"- alert_group_ids: {', '.join(str(item) for item in summary['alert_group_ids'])}")
     print(f"- task_id: {summary['submitted_task_id']}")
+    print(f"- task_alert_group_id: {summary['submitted_alert_group_id']}")
     print(f"- task_status: {summary['task_status']}")
     print(f"- mode: {summary['mode']}")
     print(f"- service: {summary['service']}")

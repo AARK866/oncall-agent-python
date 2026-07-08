@@ -28,3 +28,4 @@ Docs:
 - Tools health API: `docs/tools-health-api.md`
 - Alert webhook: `docs/alert-webhook.md`
 - Async tasks: `docs/async-tasks.md`
+- Alert deduplication: `docs/alert-dedup.md`

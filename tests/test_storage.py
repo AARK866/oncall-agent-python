@@ -1,4 +1,5 @@
 from app.schemas import (
+    AlertGroupStatus,
     AlertSeverity,
     ChatMode,
     ChatResponse,
@@ -88,3 +89,41 @@ def test_sqlite_task_store_records_task_events(tmp_path) -> None:
         DiagnosisTaskEventType.tool_result,
         DiagnosisTaskEventType.succeeded,
     ]
+
+
+def test_sqlite_task_store_aggregates_alert_groups_by_dedupe_key(tmp_path) -> None:
+    store = SQLiteTaskStore(tmp_path / "tasks.db")
+
+    first_group = store.upsert_alert_group(
+        dedupe_key="alertmanager:fingerprint:test",
+        source="alertmanager",
+        title="High5xxRate",
+        service="payment-api",
+        severity=AlertSeverity.critical,
+        labels={"alertname": "High5xxRate", "service": "payment-api"},
+    )
+    second_group = store.upsert_alert_group(
+        dedupe_key="alertmanager:fingerprint:test",
+        source="alertmanager",
+        title="High5xxRate",
+        service="payment-api",
+        severity=AlertSeverity.critical,
+        labels={"alertname": "High5xxRate", "service": "payment-api"},
+    )
+    task = store.create_task(
+        source="alertmanager",
+        question="payment service 5xx is high",
+        session_id="group-storage-test",
+        alert_group_id=first_group.group_id,
+        service="payment-api",
+        severity=AlertSeverity.critical,
+    )
+    diagnosed_group = store.attach_task_to_alert_group(first_group.group_id, task.task_id)
+    resolved_group = store.resolve_alert_group("alertmanager:fingerprint:test")
+
+    assert first_group.group_id == second_group.group_id
+    assert second_group.trigger_count == 2
+    assert diagnosed_group.latest_task_id == task.task_id
+    assert resolved_group is not None
+    assert resolved_group.status == AlertGroupStatus.resolved
+    assert resolved_group.trigger_count == 3

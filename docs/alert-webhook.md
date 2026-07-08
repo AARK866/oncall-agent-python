@@ -55,6 +55,9 @@ Use this endpoint as a Prometheus Alertmanager webhook receiver.
 
 Only `firing` alerts are queued for diagnosis. `resolved` alerts are counted as ignored.
 
+Repeated `firing` alerts are grouped by a stable dedupe key. For Alertmanager, the
+primary key is the alert `fingerprint`. See `docs/alert-dedup.md`.
+
 ## Runtime Flow
 
 ```mermaid

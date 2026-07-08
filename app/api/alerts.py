@@ -4,14 +4,14 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, status
 
 from app.schemas import (
+    AlertGroupRecord,
     AlertAnalyzeRequest,
     AlertSeverity,
     AlertTriggerResponse,
     AlertmanagerAlert,
     AlertmanagerWebhookRequest,
-    DiagnosisTaskRecord,
 )
-from app.tasks import DiagnosisTaskQueue
+from app.tasks import DiagnosisTaskQueue, DiagnosisTaskSubmission
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -28,39 +28,45 @@ async def analyze_alert(
     labels = dict(request.labels)
     labels.setdefault("service", request.service)
     labels.setdefault("severity", request.severity.value)
+    title = request.title
+    annotations = request.annotations
 
-    task = _submit_background_diagnosis(
+    submission = _submit_background_diagnosis(
         background_tasks=background_tasks,
+        queue=DiagnosisTaskQueue(),
+        dedupe_key=_api_alert_dedupe_key(request.alert_id),
         source="api_alert",
         question=_build_alert_question(
-            title=request.title,
+            title=title,
             service=request.service,
             severity=request.severity,
             labels=labels,
-            annotations=request.annotations,
+            annotations=annotations,
             start_time=request.start_time,
         ),
         session_id=_session_id("alert", request.alert_id),
+        title=title,
         service=request.service,
         severity=request.severity,
         labels=labels,
+        annotations=annotations,
         trigger_metadata={
             "source": "api_alert",
             "alert_id": request.alert_id,
-            "title": request.title,
+            "title": title,
             "service": request.service,
             "severity": request.severity.value,
             "start_time": _datetime_text(request.start_time),
             "labels": labels,
-            "annotations": request.annotations,
+            "annotations": annotations,
         },
     )
 
     return AlertTriggerResponse(
         received=1,
         processed=1,
-        tasks=[task],
-        metadata={"source": "api_alert"},
+        tasks=[submission.task],
+        metadata=_submission_metadata("api_alert", [submission]),
     )
 
 
@@ -73,12 +79,23 @@ async def receive_alertmanager_webhook(
     request: AlertmanagerWebhookRequest,
     background_tasks: BackgroundTasks,
 ) -> AlertTriggerResponse:
-    tasks: list[DiagnosisTaskRecord] = []
+    queue = DiagnosisTaskQueue()
+    submissions: list[DiagnosisTaskSubmission] = []
+    resolved_groups: list[AlertGroupRecord] = []
     firing_alerts = [
         (index, alert)
         for index, alert in enumerate(request.alerts)
         if _is_firing(alert)
     ]
+
+    for index, alert in enumerate(request.alerts):
+        if _is_firing(alert):
+            continue
+        labels = {**request.common_labels, **alert.labels}
+        dedupe_key = _alertmanager_dedupe_key(request=request, alert=alert, labels=labels, index=index)
+        resolved = queue.resolve_alert(dedupe_key)
+        if resolved:
+            resolved_groups.append(resolved)
 
     for index, alert in firing_alerts:
         labels = {**request.common_labels, **alert.labels}
@@ -87,10 +104,13 @@ async def receive_alertmanager_webhook(
         service = _service_from_labels(labels)
         title = _alert_title(labels, annotations)
         alert_id = alert.fingerprint or f"{request.group_key or 'alert'}-{index}"
+        dedupe_key = _alertmanager_dedupe_key(request=request, alert=alert, labels=labels, index=index)
 
-        tasks.append(
+        submissions.append(
             _submit_background_diagnosis(
                 background_tasks=background_tasks,
+                queue=queue,
+                dedupe_key=dedupe_key,
                 source="alertmanager",
                 question=_build_alert_question(
                     title=title,
@@ -101,9 +121,11 @@ async def receive_alertmanager_webhook(
                     start_time=alert.starts_at,
                 ),
                 session_id=_session_id("alertmanager", alert_id),
+                title=title,
                 service=service,
                 severity=severity,
                 labels=labels,
+                annotations=annotations,
                 trigger_metadata=_alertmanager_trigger_metadata(
                     request=request,
                     alert=alert,
@@ -119,40 +141,81 @@ async def receive_alertmanager_webhook(
 
     return AlertTriggerResponse(
         received=len(request.alerts),
-        processed=len(tasks),
-        tasks=tasks,
+        processed=len(submissions),
+        tasks=[submission.task for submission in submissions],
         metadata={
+            **_submission_metadata("alertmanager", submissions),
             "source": "alertmanager",
             "receiver": request.receiver,
             "status": request.status,
             "group_key": request.group_key,
-            "ignored": len(request.alerts) - len(tasks),
+            "ignored": len(request.alerts) - len(submissions),
+            "resolved": len(resolved_groups),
+            "resolved_group_ids": [group.group_id for group in resolved_groups],
         },
     )
 
 
+@router.get("/groups", response_model=list[AlertGroupRecord])
+async def list_alert_groups(limit: int = 20) -> list[AlertGroupRecord]:
+    return DiagnosisTaskQueue().list_alert_groups(limit=limit)
+
+
+@router.get("/groups/{group_id}", response_model=AlertGroupRecord)
+async def get_alert_group(group_id: str) -> AlertGroupRecord:
+    from fastapi import HTTPException
+
+    group = DiagnosisTaskQueue().get_alert_group(group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Alert group not found")
+    return group
+
+
 def _submit_background_diagnosis(
     background_tasks: BackgroundTasks,
+    queue: DiagnosisTaskQueue,
+    dedupe_key: str,
     source: str,
     question: str,
     session_id: str,
+    title: str,
     service: str | None,
     severity: AlertSeverity,
     labels: dict[str, str],
+    annotations: dict[str, str],
     trigger_metadata: dict[str, Any],
-) -> DiagnosisTaskRecord:
-    queue = DiagnosisTaskQueue()
-    task = queue.submit(
+) -> DiagnosisTaskSubmission:
+    submission = queue.submit_alert(
+        dedupe_key=dedupe_key,
         source=source,
+        title=title,
         question=question,
         session_id=session_id,
         service=service,
         severity=severity,
         labels=labels,
+        annotations=annotations,
         trigger_metadata=trigger_metadata,
     )
-    background_tasks.add_task(queue.run, task.task_id)
-    return task
+    if submission.scheduled:
+        background_tasks.add_task(queue.run, submission.task.task_id)
+    return submission
+
+
+def _submission_metadata(
+    source: str,
+    submissions: list[DiagnosisTaskSubmission],
+) -> dict[str, Any]:
+    return {
+        "source": source,
+        "scheduled": sum(1 for submission in submissions if submission.scheduled),
+        "deduplicated": sum(1 for submission in submissions if submission.deduplicated),
+        "alert_group_ids": [
+            submission.alert_group.group_id
+            for submission in submissions
+            if submission.alert_group is not None
+        ],
+    }
 
 
 def _is_firing(alert: AlertmanagerAlert) -> bool:
@@ -183,6 +246,23 @@ def _severity_from_labels(labels: dict[str, str]) -> AlertSeverity:
     if raw in {"info", "informational", "notice", "p4"}:
         return AlertSeverity.info
     return AlertSeverity.warning
+
+
+def _api_alert_dedupe_key(alert_id: str) -> str:
+    return f"api_alert:alert_id:{alert_id}"
+
+
+def _alertmanager_dedupe_key(
+    request: AlertmanagerWebhookRequest,
+    alert: AlertmanagerAlert,
+    labels: dict[str, str],
+    index: int,
+) -> str:
+    if alert.fingerprint:
+        return f"alertmanager:fingerprint:{alert.fingerprint}"
+    if request.group_key:
+        return f"alertmanager:group:{request.group_key}:index:{index}"
+    return f"alertmanager:labels:{_format_kv(labels)}"
 
 
 def _build_alert_question(

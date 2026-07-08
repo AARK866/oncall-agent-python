@@ -37,6 +37,11 @@ class DiagnosisTaskStatus(str, Enum):
     failed = "failed"
 
 
+class AlertGroupStatus(str, Enum):
+    active = "active"
+    resolved = "resolved"
+
+
 class DiagnosisTaskEventType(str, Enum):
     queued = "queued"
     running = "running"
@@ -124,6 +129,7 @@ class ChatResponse(BaseModel):
 
 class DiagnosisTaskRecord(BaseModel):
     task_id: str
+    alert_group_id: str | None = None
     source: str
     status: DiagnosisTaskStatus
     question: str
@@ -140,6 +146,26 @@ class DiagnosisTaskRecord(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+class AlertGroupRecord(BaseModel):
+    group_id: str
+    dedupe_key: str
+    source: str
+    title: str
+    service: str | None = None
+    severity: AlertSeverity = AlertSeverity.warning
+    status: AlertGroupStatus = AlertGroupStatus.active
+    labels: dict[str, str] = Field(default_factory=dict)
+    annotations: dict[str, str] = Field(default_factory=dict)
+    trigger_count: int = Field(default=1, ge=1)
+    latest_task_id: str | None = None
+    incident_id: str | None = None
+    diagnosis_id: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    first_seen_at: datetime = Field(default_factory=datetime.utcnow)
+    last_seen_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class DiagnosisTaskEventRecord(BaseModel):
