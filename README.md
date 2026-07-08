@@ -27,3 +27,4 @@ Docs:
 - Real ops connectors: `docs/real-ops-connectors.md`
 - Tools health API: `docs/tools-health-api.md`
 - Alert webhook: `docs/alert-webhook.md`
+- Async tasks: `docs/async-tasks.md`

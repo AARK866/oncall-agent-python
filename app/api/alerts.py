@@ -1,29 +1,37 @@
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, status
 
-from app.agents import OpsAgent
 from app.schemas import (
     AlertAnalyzeRequest,
     AlertSeverity,
     AlertTriggerResponse,
     AlertmanagerAlert,
     AlertmanagerWebhookRequest,
-    ChatResponse,
+    DiagnosisTaskRecord,
 )
-from app.storage import SQLiteIncidentStore
+from app.tasks import DiagnosisTaskQueue
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 
-@router.post("/analyze", response_model=AlertTriggerResponse)
-async def analyze_alert(request: AlertAnalyzeRequest) -> AlertTriggerResponse:
+@router.post(
+    "/analyze",
+    response_model=AlertTriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def analyze_alert(
+    request: AlertAnalyzeRequest,
+    background_tasks: BackgroundTasks,
+) -> AlertTriggerResponse:
     labels = dict(request.labels)
     labels.setdefault("service", request.service)
     labels.setdefault("severity", request.severity.value)
 
-    response = await _ops_agent().analyze(
+    task = _submit_background_diagnosis(
+        background_tasks=background_tasks,
+        source="api_alert",
         question=_build_alert_question(
             title=request.title,
             service=request.service,
@@ -51,17 +59,21 @@ async def analyze_alert(request: AlertAnalyzeRequest) -> AlertTriggerResponse:
     return AlertTriggerResponse(
         received=1,
         processed=1,
-        results=[response],
+        tasks=[task],
         metadata={"source": "api_alert"},
     )
 
 
-@router.post("/alertmanager", response_model=AlertTriggerResponse)
+@router.post(
+    "/alertmanager",
+    response_model=AlertTriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def receive_alertmanager_webhook(
     request: AlertmanagerWebhookRequest,
+    background_tasks: BackgroundTasks,
 ) -> AlertTriggerResponse:
-    agent = _ops_agent()
-    results: list[ChatResponse] = []
+    tasks: list[DiagnosisTaskRecord] = []
     firing_alerts = [
         (index, alert)
         for index, alert in enumerate(request.alerts)
@@ -76,8 +88,10 @@ async def receive_alertmanager_webhook(
         title = _alert_title(labels, annotations)
         alert_id = alert.fingerprint or f"{request.group_key or 'alert'}-{index}"
 
-        results.append(
-            await agent.analyze(
+        tasks.append(
+            _submit_background_diagnosis(
+                background_tasks=background_tasks,
+                source="alertmanager",
                 question=_build_alert_question(
                     title=title,
                     service=service,
@@ -105,20 +119,40 @@ async def receive_alertmanager_webhook(
 
     return AlertTriggerResponse(
         received=len(request.alerts),
-        processed=len(results),
-        results=results,
+        processed=len(tasks),
+        tasks=tasks,
         metadata={
             "source": "alertmanager",
             "receiver": request.receiver,
             "status": request.status,
             "group_key": request.group_key,
-            "ignored": len(request.alerts) - len(results),
+            "ignored": len(request.alerts) - len(tasks),
         },
     )
 
 
-def _ops_agent() -> OpsAgent:
-    return OpsAgent.create_default(incident_store=SQLiteIncidentStore.from_settings())
+def _submit_background_diagnosis(
+    background_tasks: BackgroundTasks,
+    source: str,
+    question: str,
+    session_id: str,
+    service: str | None,
+    severity: AlertSeverity,
+    labels: dict[str, str],
+    trigger_metadata: dict[str, Any],
+) -> DiagnosisTaskRecord:
+    queue = DiagnosisTaskQueue()
+    task = queue.submit(
+        source=source,
+        question=question,
+        session_id=session_id,
+        service=service,
+        severity=severity,
+        labels=labels,
+        trigger_metadata=trigger_metadata,
+    )
+    background_tasks.add_task(queue.run, task.task_id)
+    return task
 
 
 def _is_firing(alert: AlertmanagerAlert) -> bool:

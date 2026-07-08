@@ -23,8 +23,8 @@ Use this endpoint when another service has already normalized the alert.
 }
 ```
 
-The API converts the alert into an ops question, runs `OpsAgent`, stores the incident,
-and returns the diagnosis result.
+The API converts the alert into an ops question, creates a background diagnosis task,
+and returns `202 Accepted` with a `task_id`.
 
 ### POST `/api/alerts/alertmanager`
 
@@ -53,7 +53,7 @@ Use this endpoint as a Prometheus Alertmanager webhook receiver.
 }
 ```
 
-Only `firing` alerts are processed. `resolved` alerts are counted as ignored.
+Only `firing` alerts are queued for diagnosis. `resolved` alerts are counted as ignored.
 
 ## Runtime Flow
 
@@ -61,13 +61,14 @@ Only `firing` alerts are processed. `resolved` alerts are counted as ignored.
 flowchart LR
     A["Alertmanager webhook"] --> B["/api/alerts/alertmanager"]
     B --> C["Filter firing alerts"]
-    C --> D["Build diagnosis question"]
-    D --> E["OpsAgent graph"]
-    E --> F["Real or mock ops tools"]
-    E --> G["Knowledge retrieval"]
-    E --> H["LLM summary"]
-    H --> I["SQLite incident history"]
-    I --> J["API response"]
+    C --> D["Create diagnosis task"]
+    D --> E["Return task_id"]
+    D --> F["Background runner"]
+    F --> G["OpsAgent graph"]
+    G --> H["Real or mock ops tools"]
+    G --> I["Knowledge retrieval"]
+    G --> J["LLM summary"]
+    J --> K["SQLite task and incident history"]
 ```
 
 ## Local Check
@@ -77,6 +78,9 @@ Run a mock local check without starting the server:
 ```powershell
 .\.venv\Scripts\python.exe scripts\check_alert_webhook.py --in-process --mock-llm
 ```
+
+The check script submits the webhook payload and then polls `/api/tasks/{task_id}` until
+the background diagnosis task finishes.
 
 Run the same alert through real Prometheus, Loki, GitHub, Milvus, and embedding settings:
 

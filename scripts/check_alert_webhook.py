@@ -22,9 +22,10 @@ async def main() -> int:
     payload = _sample_alertmanager_payload(args.service, args.severity)
     async with _api_client(args) as client:
         response = await _post_json(client, "/api/alerts/alertmanager", payload)
+        task = await _wait_for_first_task(client, response, args.poll_attempts, args.poll_interval)
 
-    summary = _summarize_response(response)
-    _print_summary(summary, response, args.json)
+    summary = _summarize_response(response, task)
+    _print_summary(summary, response, task, args.json)
     return 0 if _is_success(summary) else 1
 
 
@@ -37,6 +38,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--in-process", action="store_true", help="Call the FastAPI app in-process through ASGI.")
     parser.add_argument("--mock-llm", action="store_true", help="Use MockLLM in --in-process mode.")
     parser.add_argument("--real-tools", action="store_true", help="Use real ops tools in --in-process mode.")
+    parser.add_argument("--poll-attempts", type=int, default=20, help="Task polling attempts.")
+    parser.add_argument("--poll-interval", type=float, default=1.0, help="Seconds between task polling attempts.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     return parser.parse_args()
 
@@ -73,6 +76,32 @@ async def _post_json(client: httpx.AsyncClient, path: str, payload: dict[str, An
     return response.json()
 
 
+async def _get_json(client: httpx.AsyncClient, path: str) -> dict[str, Any]:
+    response = await client.get(path)
+    response.raise_for_status()
+    return response.json()
+
+
+async def _wait_for_first_task(
+    client: httpx.AsyncClient,
+    webhook_response: dict[str, Any],
+    attempts: int,
+    interval: float,
+) -> dict[str, Any]:
+    tasks = webhook_response.get("tasks") or []
+    if not tasks:
+        return {}
+
+    task_id = tasks[0]["task_id"]
+    task: dict[str, Any] = {}
+    for _ in range(attempts):
+        task = await _get_json(client, f"/api/tasks/{task_id}")
+        if task.get("status") in {"succeeded", "failed"}:
+            return task
+        await asyncio.sleep(interval)
+    return task
+
+
 def _sample_alertmanager_payload(service: str, severity: str) -> dict[str, Any]:
     return {
         "version": "4",
@@ -102,15 +131,17 @@ def _sample_alertmanager_payload(service: str, severity: str) -> dict[str, Any]:
     }
 
 
-def _summarize_response(response: dict[str, Any]) -> dict[str, Any]:
-    results = response.get("results", [])
-    first_result = results[0] if results else {}
+def _summarize_response(response: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    first_result = task.get("result") or {}
     metadata = first_result.get("metadata", {})
     trigger = metadata.get("trigger", {})
     tool_connector = metadata.get("tool_connector", {})
+    submitted_tasks = response.get("tasks", [])
     return {
         "received": response.get("received"),
         "processed": response.get("processed"),
+        "submitted_task_id": submitted_tasks[0].get("task_id") if submitted_tasks else None,
+        "task_status": task.get("status"),
         "mode": first_result.get("mode"),
         "service": metadata.get("service"),
         "trigger_source": trigger.get("source"),
@@ -127,20 +158,28 @@ def _is_success(summary: dict[str, Any]) -> bool:
     return (
         summary["received"] == 1
         and summary["processed"] == 1
+        and summary["task_status"] == "succeeded"
         and summary["mode"] == "ops"
         and summary["trigger_source"] == "alertmanager"
         and summary["answer_present"] is True
     )
 
 
-def _print_summary(summary: dict[str, Any], response: dict[str, Any], as_json: bool) -> None:
+def _print_summary(
+    summary: dict[str, Any],
+    response: dict[str, Any],
+    task: dict[str, Any],
+    as_json: bool,
+) -> None:
     if as_json:
-        print(json.dumps({"summary": summary, "response": response}, ensure_ascii=False, indent=2))
+        print(json.dumps({"summary": summary, "response": response, "task": task}, ensure_ascii=False, indent=2))
         return
 
     print("Alert webhook check")
     print(f"- received: {summary['received']}")
     print(f"- processed: {summary['processed']}")
+    print(f"- task_id: {summary['submitted_task_id']}")
+    print(f"- task_status: {summary['task_status']}")
     print(f"- mode: {summary['mode']}")
     print(f"- service: {summary['service']}")
     print(f"- trigger: {summary['trigger_source']} alert_id={summary['alert_id']}")
@@ -149,9 +188,9 @@ def _print_summary(summary: dict[str, Any], response: dict[str, Any], as_json: b
     print(f"- incident_id: {summary['incident_id']}")
     print("")
     print("Answer preview")
-    results = response.get("results", [])
-    if results:
-        print(str(results[0].get("answer", ""))[:1200])
+    result = task.get("result") or {}
+    if result:
+        print(str(result.get("answer", ""))[:1200])
 
 
 if __name__ == "__main__":

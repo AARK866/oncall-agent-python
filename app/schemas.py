@@ -30,6 +30,13 @@ class IncidentStatus(str, Enum):
     resolved = "resolved"
 
 
+class DiagnosisTaskStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+
+
 class AgentEventType(str, Enum):
     thinking = "thinking"
     tool_call = "tool_call"
@@ -105,9 +112,30 @@ class ChatResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class DiagnosisTaskRecord(BaseModel):
+    task_id: str
+    source: str
+    status: DiagnosisTaskStatus
+    question: str
+    session_id: str
+    service: str | None = None
+    severity: AlertSeverity = AlertSeverity.warning
+    labels: dict[str, str] = Field(default_factory=dict)
+    trigger_metadata: dict[str, Any] = Field(default_factory=dict)
+    result: ChatResponse | None = None
+    incident_id: str | None = None
+    diagnosis_id: str | None = None
+    error: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class AlertTriggerResponse(BaseModel):
     received: int
     processed: int
+    tasks: list[DiagnosisTaskRecord] = Field(default_factory=list)
     results: list[ChatResponse] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

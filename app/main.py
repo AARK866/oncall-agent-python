@@ -5,6 +5,7 @@ from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.api.incidents import router as incidents_router
 from app.api.knowledge import router as knowledge_router
+from app.api.tasks import router as tasks_router
 from app.api.tools import router as tools_router
 from app.config import settings
 
@@ -21,6 +22,7 @@ def create_app() -> FastAPI:
     app.include_router(alerts_router)
     app.include_router(incidents_router)
     app.include_router(knowledge_router)
+    app.include_router(tasks_router)
     app.include_router(tools_router)
 
     @app.get("/")
