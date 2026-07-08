@@ -12,6 +12,7 @@ python scripts/check_real_incident_flow.py --mock-llm
 python scripts/check_real_api_flow.py --in-process --mock-llm
 python scripts/check_alert_webhook.py --in-process --mock-llm
 python scripts/ingest_knowledge.py --source local --path app/data/runbooks
+python scripts/run_acceptance.py
 docker compose up --build api
 .\.venv\Scripts\python.exe -m pytest
 ```
@@ -34,3 +35,4 @@ Docs:
 - Alert webhook: `docs/alert-webhook.md`
 - Async tasks: `docs/async-tasks.md`
 - Alert deduplication: `docs/alert-dedup.md`
+- Project acceptance: `docs/project-acceptance.md`
