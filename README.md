@@ -11,6 +11,7 @@ python scripts/check_enterprise_stack.py
 python scripts/check_real_incident_flow.py --mock-llm
 python scripts/check_real_api_flow.py --in-process --mock-llm
 python scripts/check_alert_webhook.py --in-process --mock-llm
+python scripts/ingest_knowledge.py --source local --path app/data/runbooks
 .\.venv\Scripts\python.exe -m pytest
 ```
 
@@ -24,6 +25,7 @@ Docs:
 - LangGraph setup: `docs/langgraph-setup.md`
 - Vector store setup: `docs/vector-store.md`
 - Knowledge API: `docs/knowledge-api.md`
+- Knowledge ingestion: `docs/knowledge-ingestion.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
 - Tools health API: `docs/tools-health-api.md`
 - Alert webhook: `docs/alert-webhook.md`

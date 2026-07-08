@@ -1,9 +1,13 @@
 from fastapi import APIRouter, HTTPException
 
+from app.config import settings
 from app.rag import KnowledgeBase
+from app.rag.ingestion import KnowledgeIngestionPipeline
 from app.schemas import (
     KnowledgeDocumentDetail,
     KnowledgeDocumentSummary,
+    KnowledgeIngestRequest,
+    KnowledgeIngestResponse,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
     KnowledgeStatsResponse,
@@ -63,5 +67,19 @@ async def search_knowledge(request: KnowledgeSearchRequest) -> KnowledgeSearchRe
     )
 
 
+@router.post("/ingest", response_model=KnowledgeIngestResponse)
+async def ingest_knowledge(request: KnowledgeIngestRequest) -> KnowledgeIngestResponse:
+    return await KnowledgeIngestionPipeline().ingest(
+        source=request.source,
+        path=request.path,
+        chunk_size=request.chunk_size,
+        chunk_overlap=request.chunk_overlap,
+    )
+
+
 def _knowledge_base() -> KnowledgeBase:
-    return KnowledgeBase.from_directory("app/data/runbooks")
+    return KnowledgeBase.from_directory(
+        settings.knowledge_local_path,
+        chunk_size=settings.knowledge_ingest_chunk_size,
+        chunk_overlap=settings.knowledge_ingest_chunk_overlap,
+    )

@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: int = 30
     embedding_max_retries: int = 6
     knowledge_vector_store: str = "in_memory"
+    knowledge_source: str = "local"
+    knowledge_local_path: str = "app/data/runbooks"
+    knowledge_github_path: str = "app/data/runbooks"
+    knowledge_ingest_chunk_size: int = 800
+    knowledge_ingest_chunk_overlap: int = 120
     milvus_uri: str | None = None
     milvus_token: str | None = None
     milvus_db_name: str | None = None

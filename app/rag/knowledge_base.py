@@ -49,7 +49,7 @@ class KnowledgeBase:
         retriever_mode: str | None = None,
     ) -> "KnowledgeBase":
         raw_documents = load_markdown_documents(directory)
-        documents = [_enrich_document_metadata(document) for document in raw_documents]
+        documents = enrich_documents_metadata(raw_documents)
         chunks = split_documents(documents, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         return cls(
             documents=documents,
@@ -191,7 +191,11 @@ class KnowledgeBase:
         )[:top_k]
 
 
-def _enrich_document_metadata(document: RawDocument) -> RawDocument:
+def enrich_documents_metadata(documents: list[RawDocument]) -> list[RawDocument]:
+    return [enrich_document_metadata(document) for document in documents]
+
+
+def enrich_document_metadata(document: RawDocument) -> RawDocument:
     identity_text = f"{document.title}\n{document.doc_id}".lower()
     full_text = f"{identity_text}\n{document.content}".lower()
     services = _infer_values(text=identity_text, aliases=SERVICE_ALIASES)

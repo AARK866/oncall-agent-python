@@ -119,6 +119,30 @@ class KnowledgeSearchResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class KnowledgeIngestSource(str, Enum):
+    local = "local"
+    github = "github"
+
+
+class KnowledgeIngestRequest(BaseModel):
+    source: KnowledgeIngestSource | None = None
+    path: str | None = None
+    chunk_size: int = Field(default=800, ge=100, le=8000)
+    chunk_overlap: int = Field(default=120, ge=0, le=2000)
+
+
+class KnowledgeIngestResponse(BaseModel):
+    status: str
+    source: KnowledgeIngestSource
+    path: str
+    documents_loaded: int
+    chunks_created: int
+    vector_store: str
+    collection_name: str | None = None
+    document_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ChatResponse(BaseModel):
     session_id: str
     answer: str

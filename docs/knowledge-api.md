@@ -43,3 +43,16 @@ The response includes:
 - `results`: matched source documents
 - `metadata.retrieved_count`: number of returned chunks
 - `metadata.knowledge_base`: current knowledge base status
+
+## Ingest
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/knowledge/ingest `
+  -ContentType "application/json" `
+  -Body '{"source":"local","path":"app/data/runbooks","chunk_size":800,"chunk_overlap":120}'
+```
+
+This loads runbooks, splits them into chunks, embeds them, and upserts them into the
+configured vector store. See `docs/knowledge-ingestion.md` for local, GitHub, and Milvus usage.

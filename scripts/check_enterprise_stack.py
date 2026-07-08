@@ -198,7 +198,7 @@ async def _check_rag() -> CheckResult:
         return CheckResult("rag", "SKIP", "KNOWLEDGE_VECTOR_STORE is not milvus")
 
     def search() -> int:
-        knowledge_base = KnowledgeBase.from_directory("app/data/runbooks")
+        knowledge_base = KnowledgeBase.from_directory(settings.knowledge_local_path)
         results = knowledge_base.search("payment service 5xx database connection pool", top_k=2)
         return len(results)
 
