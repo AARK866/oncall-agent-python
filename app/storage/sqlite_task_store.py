@@ -15,6 +15,8 @@ from app.schemas import (
     DiagnosisTaskEventType,
     DiagnosisTaskRecord,
     DiagnosisTaskStatus,
+    HumanReviewRequestRecord,
+    HumanReviewStatus,
     OpsGraphCheckpointRecord,
 )
 
@@ -346,6 +348,135 @@ class SQLiteTaskStore:
             )
         return checkpoint
 
+    def create_human_review_request(
+        self,
+        task_id: str,
+        service: str | None,
+        proposed_actions: list[str],
+        risk_reasons: list[str],
+        metadata: dict[str, Any] | None = None,
+    ) -> HumanReviewRequestRecord:
+        review = HumanReviewRequestRecord(
+            review_id=f"review_{uuid4().hex}",
+            task_id=task_id,
+            service=service,
+            proposed_actions=proposed_actions,
+            risk_reasons=risk_reasons,
+            metadata=metadata or {},
+            created_at=datetime.utcnow(),
+        )
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO human_review_requests (
+                    review_id, task_id, service, status, proposed_actions_json,
+                    risk_reasons_json, metadata_json, reviewer, decision_reason,
+                    created_at, decided_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                _human_review_values(review),
+            )
+        return review
+
+    def get_human_review_request(self, review_id: str) -> HumanReviewRequestRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM human_review_requests WHERE review_id = ?",
+                (review_id,),
+            ).fetchone()
+        return _human_review_from_row(row) if row else None
+
+    def require_human_review_request(self, review_id: str) -> HumanReviewRequestRecord:
+        review = self.get_human_review_request(review_id)
+        if review is None:
+            raise KeyError(f"Human review request not found: {review_id}")
+        return review
+
+    def list_human_review_requests(
+        self,
+        status: HumanReviewStatus | None = None,
+        limit: int = 20,
+    ) -> list[HumanReviewRequestRecord]:
+        with self._connect() as connection:
+            if status is None:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM human_review_requests
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM human_review_requests
+                    WHERE status = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (status.value, limit),
+                ).fetchall()
+        return [_human_review_from_row(row) for row in rows]
+
+    def list_human_review_requests_for_task(self, task_id: str) -> list[HumanReviewRequestRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM human_review_requests
+                WHERE task_id = ?
+                ORDER BY created_at ASC
+                """,
+                (task_id,),
+            ).fetchall()
+        return [_human_review_from_row(row) for row in rows]
+
+    def decide_human_review_request(
+        self,
+        review_id: str,
+        status: HumanReviewStatus,
+        reviewer: str,
+        reason: str | None = None,
+    ) -> HumanReviewRequestRecord:
+        if status not in {HumanReviewStatus.approved, HumanReviewStatus.rejected}:
+            raise ValueError("Human review decision must be approved or rejected.")
+
+        review = self.require_human_review_request(review_id)
+        decided_at = datetime.utcnow()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE human_review_requests
+                SET status = ?, reviewer = ?, decision_reason = ?, decided_at = ?
+                WHERE review_id = ?
+                """,
+                (
+                    status.value,
+                    reviewer,
+                    reason,
+                    _datetime_to_text(decided_at),
+                    review.review_id,
+                ),
+            )
+        updated = self.require_human_review_request(review_id)
+        event_type = (
+            DiagnosisTaskEventType.human_review_approved
+            if status == HumanReviewStatus.approved
+            else DiagnosisTaskEventType.human_review_rejected
+        )
+        self.append_event(
+            task_id=updated.task_id,
+            event_type=event_type,
+            message=f"Human review {status.value}.",
+            data={
+                "review_id": updated.review_id,
+                "reviewer": reviewer,
+                "reason": reason,
+            },
+        )
+        return updated
+
     def get_task(self, task_id: str) -> DiagnosisTaskRecord | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -513,6 +644,36 @@ class SQLiteTaskStore:
                 ON ops_graph_checkpoints (task_id, created_at)
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS human_review_requests (
+                    review_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    service TEXT,
+                    status TEXT NOT NULL,
+                    proposed_actions_json TEXT NOT NULL,
+                    risk_reasons_json TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    reviewer TEXT,
+                    decision_reason TEXT,
+                    created_at TEXT NOT NULL,
+                    decided_at TEXT,
+                    FOREIGN KEY (task_id) REFERENCES diagnosis_tasks (task_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_human_review_requests_status_created
+                ON human_review_requests (status, created_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_human_review_requests_task_created
+                ON human_review_requests (task_id, created_at)
+                """
+            )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
@@ -588,6 +749,22 @@ def _checkpoint_values(checkpoint: OpsGraphCheckpointRecord) -> tuple[Any, ...]:
     )
 
 
+def _human_review_values(review: HumanReviewRequestRecord) -> tuple[Any, ...]:
+    return (
+        review.review_id,
+        review.task_id,
+        review.service,
+        review.status.value,
+        _json_dumps(review.proposed_actions),
+        _json_dumps(review.risk_reasons),
+        _json_dumps(review.metadata),
+        review.reviewer,
+        review.decision_reason,
+        _datetime_to_text(review.created_at),
+        _datetime_to_text(review.decided_at) if review.decided_at else None,
+    )
+
+
 def _task_from_row(row: sqlite3.Row) -> DiagnosisTaskRecord:
     result_data = _json_loads(row["result_json"], None)
     return DiagnosisTaskRecord(
@@ -654,6 +831,22 @@ def _checkpoint_from_row(row: sqlite3.Row) -> OpsGraphCheckpointRecord:
         state=_json_loads(row["state_json"], {}),
         error=row["error"],
         created_at=_datetime_from_text(row["created_at"]),
+    )
+
+
+def _human_review_from_row(row: sqlite3.Row) -> HumanReviewRequestRecord:
+    return HumanReviewRequestRecord(
+        review_id=row["review_id"],
+        task_id=row["task_id"],
+        service=row["service"],
+        status=HumanReviewStatus(row["status"]),
+        proposed_actions=_json_loads(row["proposed_actions_json"], []),
+        risk_reasons=_json_loads(row["risk_reasons_json"], []),
+        metadata=_json_loads(row["metadata_json"], {}),
+        reviewer=row["reviewer"],
+        decision_reason=row["decision_reason"],
+        created_at=_datetime_from_text(row["created_at"]),
+        decided_at=_datetime_from_text(row["decided_at"]) if row["decided_at"] else None,
     )
 
 

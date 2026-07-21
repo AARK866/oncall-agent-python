@@ -38,3 +38,4 @@ Docs:
 - Project acceptance: `docs/project-acceptance.md`
 - LangGraph reliability: `docs/langgraph-reliability.md`
 - Error recovery: `docs/error-recovery.md`
+- Human review: `docs/human-review.md`

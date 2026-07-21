@@ -18,6 +18,7 @@ from app.schemas import (
     ToolCall,
     ToolResult,
 )
+from app.reviews import build_human_review_plan
 from app.storage import SQLiteTaskStore
 from app.tools import ToolRegistry
 
@@ -39,6 +40,7 @@ class OpsGraphState:
     knowledge_response: ChatResponse | None = None
     fallback_report: DiagnosisReport | None = None
     report: DiagnosisReport | None = None
+    human_review_requests: list[dict[str, Any]] = field(default_factory=list)
     summary_metadata: dict[str, Any] = field(default_factory=dict)
     response: ChatResponse | None = None
     graph_trace: list[str] = field(default_factory=list)
@@ -277,6 +279,7 @@ class OpsGraphWorkflow:
             "has_plan_trace": state.plan_trace is not None,
             "has_fallback_report": state.fallback_report is not None,
             "has_report": state.report is not None,
+            "human_review_requests": state.human_review_requests,
             "has_response": state.response is not None,
             "summary_metadata": state.summary_metadata,
             "graph_runtime": state.graph_runtime,
@@ -294,6 +297,7 @@ class OpsGraphWorkflow:
             ("build_fallback_report", self._build_fallback_report_node),
             ("summarize_report", self._summarize_report_node),
             ("build_response", self._build_response_node),
+            ("human_review_gate", self._human_review_gate_node),
             ("persist_incident", self._persist_incident_node),
         ]
 
@@ -372,6 +376,61 @@ class OpsGraphWorkflow:
                     "reason": state.graph_runtime_reason,
                     "langgraph_available": self._is_langgraph_available(),
                 },
+            },
+        )
+
+    async def _human_review_gate_node(self, state: OpsGraphState) -> None:
+        if state.response is None:
+            raise RuntimeError("Ops graph state has no response before human review gate.")
+
+        review_plan = build_human_review_plan(self._report(state))
+        if not review_plan.required:
+            state.response.metadata["human_review"] = {
+                "required": False,
+                "requests": [],
+            }
+            return
+
+        task_id = self._task_id(state)
+        if not task_id:
+            state.response.metadata["human_review"] = {
+                "required": True,
+                "status": "not_persisted",
+                "reason": "missing_task_id",
+                "proposed_actions": review_plan.proposed_actions,
+                "risk_reasons": review_plan.risk_reasons,
+                "requests": [],
+            }
+            return
+
+        review = self.checkpoint_store.create_human_review_request(
+            task_id=task_id,
+            service=self._service(state),
+            proposed_actions=review_plan.proposed_actions,
+            risk_reasons=review_plan.risk_reasons,
+            metadata={
+                "session_id": state.session_id,
+                "trigger": state.trigger_metadata,
+                "graph_runtime": state.graph_runtime,
+                "graph_runtime_reason": state.graph_runtime_reason,
+            },
+        )
+        review_data = review.model_dump(mode="json")
+        state.human_review_requests.append(review_data)
+        state.response.metadata["human_review"] = {
+            "required": True,
+            "status": review.status.value,
+            "review_ids": [review.review_id],
+            "requests": state.human_review_requests,
+        }
+        self.checkpoint_store.append_event(
+            task_id=task_id,
+            event_type=DiagnosisTaskEventType.human_review_requested,
+            message="Human review requested for high-risk proposed actions.",
+            data={
+                "review_id": review.review_id,
+                "proposed_actions": review.proposed_actions,
+                "risk_reasons": review.risk_reasons,
             },
         )
 

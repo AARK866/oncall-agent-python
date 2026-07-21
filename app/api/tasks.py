@@ -1,6 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.schemas import DiagnosisTaskEventRecord, DiagnosisTaskRecord, OpsGraphCheckpointRecord
+from app.schemas import (
+    DiagnosisTaskEventRecord,
+    DiagnosisTaskRecord,
+    HumanReviewRequestRecord,
+    OpsGraphCheckpointRecord,
+)
 from app.security import require_api_token
 from app.tasks import DiagnosisTaskQueue
 
@@ -40,6 +45,15 @@ async def get_task_checkpoints(task_id: str) -> list[OpsGraphCheckpointRecord]:
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return queue.checkpoints(task_id)
+
+
+@router.get("/{task_id}/reviews", response_model=list[HumanReviewRequestRecord])
+async def get_task_reviews(task_id: str) -> list[HumanReviewRequestRecord]:
+    queue = _queue()
+    task = queue.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return queue.human_reviews(task_id)
 
 
 def _queue() -> DiagnosisTaskQueue:

@@ -4,6 +4,7 @@ from app.schemas import (
     ChatMode,
     ChatResponse,
     DiagnosisTaskEventType,
+    HumanReviewStatus,
     SourceDocument,
 )
 from app.storage import SQLiteIncidentStore, SQLiteTaskStore
@@ -119,6 +120,37 @@ def test_sqlite_task_store_records_graph_checkpoints(tmp_path) -> None:
     assert [checkpoint.status for checkpoint in checkpoints] == ["started", "completed"]
     assert checkpoints[0].node_name == "infer_service"
     assert checkpoints[1].state["service"] == "payment-api"
+
+
+def test_sqlite_task_store_records_human_review_decisions(tmp_path) -> None:
+    store = SQLiteTaskStore(tmp_path / "tasks.db")
+    task = store.create_task(
+        source="alertmanager",
+        question="payment service 5xx is high",
+        session_id="review-storage-test",
+        service="payment-api",
+        severity=AlertSeverity.critical,
+    )
+    review = store.create_human_review_request(
+        task_id=task.task_id,
+        service="payment-api",
+        proposed_actions=["Rollback payment-api to the previous stable version."],
+        risk_reasons=["Rollback is a high-risk production operation."],
+        metadata={"source": "test"},
+    )
+
+    approved = store.decide_human_review_request(
+        review_id=review.review_id,
+        status=HumanReviewStatus.approved,
+        reviewer="alice",
+        reason="Confirmed deployment regression.",
+    )
+    events = store.list_events(task.task_id)
+
+    assert approved.status == HumanReviewStatus.approved
+    assert approved.reviewer == "alice"
+    assert approved.decided_at is not None
+    assert events[-1].event_type == DiagnosisTaskEventType.human_review_approved
 
 
 def test_sqlite_task_store_aggregates_alert_groups_by_dedupe_key(tmp_path) -> None:

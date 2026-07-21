@@ -13,6 +13,7 @@ from app.schemas import (
     DiagnosisTaskEventType,
     DiagnosisTaskRecord,
     DiagnosisTaskStatus,
+    HumanReviewRequestRecord,
     OpsGraphCheckpointRecord,
 )
 from app.storage import SQLiteIncidentStore, SQLiteTaskStore
@@ -160,6 +161,9 @@ class DiagnosisTaskQueue:
 
     def checkpoints(self, task_id: str) -> list[OpsGraphCheckpointRecord]:
         return self.task_store.list_graph_checkpoints(task_id)
+
+    def human_reviews(self, task_id: str) -> list[HumanReviewRequestRecord]:
+        return self.task_store.list_human_review_requests_for_task(task_id)
 
     def get_alert_group(self, group_id: str) -> AlertGroupRecord | None:
         return self.task_store.get_alert_group(group_id)

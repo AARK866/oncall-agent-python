@@ -48,6 +48,9 @@ class DiagnosisTaskEventType(str, Enum):
     graph_node_started = "graph_node_started"
     graph_node_completed = "graph_node_completed"
     graph_node_failed = "graph_node_failed"
+    human_review_requested = "human_review_requested"
+    human_review_approved = "human_review_approved"
+    human_review_rejected = "human_review_rejected"
     tool_result = "tool_result"
     retrieved_docs = "retrieved_docs"
     incident_persisted = "incident_persisted"
@@ -212,6 +215,31 @@ class OpsGraphCheckpointRecord(BaseModel):
     state: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class HumanReviewStatus(str, Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
+class HumanReviewRequestRecord(BaseModel):
+    review_id: str
+    task_id: str
+    service: str | None = None
+    status: HumanReviewStatus = HumanReviewStatus.pending
+    proposed_actions: list[str] = Field(default_factory=list)
+    risk_reasons: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    reviewer: str | None = None
+    decision_reason: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    decided_at: datetime | None = None
+
+
+class HumanReviewDecisionRequest(BaseModel):
+    reviewer: str = Field(default="manual")
+    reason: str | None = None
 
 
 class AlertTriggerResponse(BaseModel):

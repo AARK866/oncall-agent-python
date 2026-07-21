@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,7 +17,7 @@ def test_alert_task_records_ops_graph_checkpoints() -> None:
     response = client.post(
         "/api/alerts/analyze",
         json={
-            "alert_id": "checkpoint-payment-5xx",
+            "alert_id": f"checkpoint-payment-5xx-{uuid4().hex}",
             "title": "High5xxRate",
             "service": "payment-api",
             "severity": "critical",
@@ -45,6 +47,7 @@ def test_alert_task_records_ops_graph_checkpoints() -> None:
         "build_fallback_report",
         "summarize_report",
         "build_response",
+        "human_review_gate",
         "persist_incident",
     ]
     assert checkpoints[0]["state"]["session_id"].startswith("alert-")

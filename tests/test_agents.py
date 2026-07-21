@@ -78,12 +78,15 @@ def test_ops_agent_returns_diagnosis_with_traces() -> None:
         "build_fallback_report",
         "summarize_report",
         "build_response",
+        "human_review_gate",
         "persist_incident",
     ]
     assert response.metadata["graph_runtime"]["requested"] == "local"
     assert response.metadata["graph_runtime"]["used"] == "local"
     assert len(response.metadata["react_steps"]) == 5
     assert len(response.metadata["plan_trace"]["plan"]) == 4
+    assert response.metadata["human_review"]["required"] is True
+    assert response.metadata["human_review"]["status"] == "not_persisted"
     assert "诊断结论" in response.answer
 
 
