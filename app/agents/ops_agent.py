@@ -113,6 +113,18 @@ class OpsAgent:
             run_id=run_id,
         )
 
+    async def resume_interrupt(
+        self,
+        thread_id: str,
+        run_id: str | None,
+        resume_value: dict[str, object],
+    ) -> ChatResponse:
+        return await self.graph.resume_interrupt(
+            thread_id=thread_id,
+            run_id=run_id,
+            resume_value=resume_value,
+        )
+
     def _persist_analysis(
         self,
         question: str,

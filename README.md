@@ -28,6 +28,7 @@ Docs:
 - LangGraph setup: `docs/langgraph-setup.md`
 - LangGraph run identity: `docs/langgraph-run-identity.md`
 - LangGraph native checkpointing: `docs/langgraph-native-checkpointing.md`
+- LangGraph native interrupt resume: `docs/langgraph-native-interrupt.md`
 - LangGraph node resume: `docs/langgraph-node-resume.md`
 - Vector store setup: `docs/vector-store.md`
 - Knowledge API: `docs/knowledge-api.md`

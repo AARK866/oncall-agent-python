@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib.util import find_spec
@@ -15,6 +16,8 @@ from app.schemas import (
     ChatResponse,
     DiagnosisReport,
     DiagnosisTaskEventType,
+    HumanReviewRequestRecord,
+    HumanReviewStatus,
     OpsGraphCheckpointRecord,
     PlanTrace,
     ReactStep,
@@ -251,6 +254,45 @@ class OpsGraphWorkflow:
         state: OpsGraphState,
         nodes: list[tuple[str, Callable[[OpsGraphState], Any]]],
     ) -> None:
+        state.graph_runtime = "langgraph"
+        state.graph_runtime_reason = "configured_langgraph"
+        compiled_graph, checkpointer_name = self._compile_langgraph(nodes)
+        state.graph_checkpointer = checkpointer_name
+        result = await asyncio.to_thread(
+            compiled_graph.invoke,
+            {"ops_state": state},
+            self._langgraph_config(state.thread_id, state.run_id),
+        )
+        self._apply_langgraph_result(result, state)
+
+    async def resume_interrupt(
+        self,
+        thread_id: str,
+        run_id: str | None,
+        resume_value: dict[str, Any],
+    ) -> ChatResponse:
+        nodes = self._nodes()
+        compiled_graph, checkpointer_name = self._compile_langgraph(nodes)
+        from langgraph.types import Command
+
+        result = await asyncio.to_thread(
+            compiled_graph.invoke,
+            Command(resume=resume_value),
+            self._langgraph_config(thread_id, run_id),
+        )
+        final_state = self._final_state_from_langgraph_result(result)
+        final_state.graph_runtime = "langgraph"
+        final_state.graph_runtime_reason = "native_interrupt_resume"
+        final_state.graph_checkpointer = checkpointer_name
+        self._refresh_response_identity(final_state)
+        if final_state.response is None:
+            raise RuntimeError("LangGraph interrupt resume completed without a response.")
+        return final_state.response
+
+    def _compile_langgraph(
+        self,
+        nodes: list[tuple[str, Callable[[OpsGraphState], Any]]],
+    ) -> tuple[Any, str]:
         from langgraph.graph import END, StateGraph
 
         graph = StateGraph(dict)
@@ -262,35 +304,60 @@ class OpsGraphWorkflow:
             graph.add_edge(nodes[index][0], nodes[index + 1][0])
         graph.add_edge(nodes[-1][0], END)
 
-        state.graph_runtime = "langgraph"
-        state.graph_runtime_reason = "configured_langgraph"
         checkpointer, checkpointer_name = create_langgraph_checkpointer(self.graph_checkpointer)
-        state.graph_checkpointer = checkpointer_name
-        compiled_graph = graph.compile(checkpointer=checkpointer)
-        result = await compiled_graph.ainvoke(
-            {"ops_state": state},
-            config={
-                "configurable": {"thread_id": state.thread_id},
-                "metadata": {
-                    "thread_id": state.thread_id,
-                    "run_id": state.run_id,
-                },
+        return graph.compile(checkpointer=checkpointer), checkpointer_name
+
+    def _langgraph_config(self, thread_id: str | None, run_id: str | None) -> dict[str, Any]:
+        return {
+            "configurable": {"thread_id": thread_id},
+            "metadata": {
+                "thread_id": thread_id,
+                "run_id": run_id,
             },
-        )
+        }
+
+    def _apply_langgraph_result(
+        self,
+        result: dict[str, Any],
+        state: OpsGraphState,
+    ) -> None:
+        final_state = self._final_state_from_langgraph_result(result)
+        state.__dict__.update(final_state.__dict__)
+        interrupts = result.get("__interrupt__") or []
+        if interrupts:
+            review_ids = self._review_ids_from_interrupts(interrupts)
+            error = "LangGraph interrupted for human review."
+            self._refresh_response_identity(state)
+            self._save_checkpoint(state, "human_review_gate", "paused", error=error)
+            raise GraphExecutionPaused(review_ids=review_ids, response=state.response)
+
+    def _final_state_from_langgraph_result(self, result: dict[str, Any]) -> OpsGraphState:
         final_state = result.get("ops_state")
         if not isinstance(final_state, OpsGraphState):
             raise RuntimeError("LangGraph did not return an OpsGraphState.")
+        return final_state
 
-        state.__dict__.update(final_state.__dict__)
+    def _review_ids_from_interrupts(self, interrupts: list[Any]) -> list[str]:
+        review_ids: list[str] = []
+        for item in interrupts:
+            value = getattr(item, "value", item)
+            if not isinstance(value, dict):
+                continue
+            for review_id in value.get("review_ids", []):
+                review_ids.append(str(review_id))
+        return review_ids
 
     def _langgraph_node(
         self,
         name: str,
         node: Callable[[OpsGraphState], Any],
     ) -> Callable[[dict[str, Any]], Any]:
-        async def wrapped(raw_state: dict[str, Any]) -> dict[str, Any]:
+        def wrapped(raw_state: dict[str, Any]) -> dict[str, Any]:
             ops_state = raw_state["ops_state"]
-            await self._run_node(ops_state, name, node)
+            if self._should_use_native_human_review_interrupt(ops_state, name):
+                self._run_native_human_review_gate_node(ops_state, name)
+            else:
+                asyncio.run(self._run_node(ops_state, name, node))
             return {"ops_state": ops_state}
 
         return wrapped
@@ -605,6 +672,47 @@ class OpsGraphWorkflow:
         )
 
     async def _human_review_gate_node(self, state: OpsGraphState) -> None:
+        payload = self._prepare_human_review_gate(state)
+        if payload is None:
+            return
+        raise GraphExecutionPaused(
+            review_ids=[str(review_id) for review_id in payload["review_ids"]],
+            response=state.response,
+        )
+
+    def _should_use_native_human_review_interrupt(
+        self,
+        state: OpsGraphState,
+        node_name: str,
+    ) -> bool:
+        return (
+            node_name == "human_review_gate"
+            and state.graph_runtime == "langgraph"
+            and state.graph_checkpointer not in {"disabled", "not_used"}
+        )
+
+    def _run_native_human_review_gate_node(
+        self,
+        state: OpsGraphState,
+        node_name: str,
+    ) -> None:
+        from langgraph.types import interrupt
+
+        self._raise_if_cancel_requested(state, node_name)
+        self._refresh_response_identity(state)
+        self._save_checkpoint(state, node_name, "started")
+        payload = self._prepare_human_review_gate(state)
+        if payload is None:
+            self._refresh_response_identity(state)
+            self._save_checkpoint(state, node_name, "completed")
+            return
+
+        resume_value = interrupt(payload)
+        self._apply_human_review_resume(state, resume_value)
+        self._refresh_response_identity(state)
+        self._save_checkpoint(state, node_name, "completed")
+
+    def _prepare_human_review_gate(self, state: OpsGraphState) -> dict[str, Any] | None:
         if state.response is None:
             raise RuntimeError("Ops graph state has no response before human review gate.")
 
@@ -628,11 +736,67 @@ class OpsGraphWorkflow:
             }
             return
 
+        review, created = self._get_or_create_human_review_request(
+            state=state,
+            task_id=task_id,
+            proposed_actions=review_plan.proposed_actions,
+            risk_reasons=review_plan.risk_reasons,
+        )
+        reviews = self._human_reviews_for_current_run(state, task_id)
+        if review.review_id not in {item.review_id for item in reviews}:
+            reviews.append(review)
+
+        state.human_review_requests = [
+            item.model_dump(mode="json")
+            for item in reviews
+        ]
+        status = self._human_review_status(reviews)
+        state.response.metadata["human_review"] = {
+            "required": True,
+            "status": status.value,
+            "review_ids": [item.review_id for item in reviews],
+            "requests": state.human_review_requests,
+        }
+        if created:
+            self.checkpoint_store.append_event(
+                task_id=task_id,
+                event_type=DiagnosisTaskEventType.human_review_requested,
+                message="Human review requested for high-risk proposed actions.",
+                data={
+                    "review_id": review.review_id,
+                    "proposed_actions": review.proposed_actions,
+                    "risk_reasons": review.risk_reasons,
+                },
+            )
+
+        return {
+            "kind": "human_review",
+            "task_id": task_id,
+            "service": self._service(state),
+            "thread_id": state.thread_id,
+            "run_id": state.run_id,
+            "review_ids": [item.review_id for item in reviews],
+            "status": status.value,
+            "proposed_actions": review_plan.proposed_actions,
+            "risk_reasons": review_plan.risk_reasons,
+        }
+
+    def _get_or_create_human_review_request(
+        self,
+        state: OpsGraphState,
+        task_id: str,
+        proposed_actions: list[str],
+        risk_reasons: list[str],
+    ) -> tuple[HumanReviewRequestRecord, bool]:
+        reviews = self._human_reviews_for_current_run(state, task_id)
+        if reviews:
+            return reviews[-1], False
+
         review = self.checkpoint_store.create_human_review_request(
             task_id=task_id,
             service=self._service(state),
-            proposed_actions=review_plan.proposed_actions,
-            risk_reasons=review_plan.risk_reasons,
+            proposed_actions=proposed_actions,
+            risk_reasons=risk_reasons,
             metadata={
                 "session_id": state.session_id,
                 "thread_id": state.thread_id,
@@ -640,27 +804,58 @@ class OpsGraphWorkflow:
                 "trigger": state.trigger_metadata,
                 "graph_runtime": state.graph_runtime,
                 "graph_runtime_reason": state.graph_runtime_reason,
+                "gate": "langgraph_interrupt"
+                if state.graph_runtime == "langgraph"
+                else "local_pause",
             },
         )
-        review_data = review.model_dump(mode="json")
-        state.human_review_requests.append(review_data)
+        return review, True
+
+    def _human_reviews_for_current_run(
+        self,
+        state: OpsGraphState,
+        task_id: str,
+    ) -> list[HumanReviewRequestRecord]:
+        return [
+            review
+            for review in self.checkpoint_store.list_human_review_requests_for_task(task_id)
+            if review.metadata.get("run_id") == state.run_id
+        ]
+
+    def _human_review_status(
+        self,
+        reviews: list[HumanReviewRequestRecord],
+    ) -> HumanReviewStatus:
+        if any(review.status == HumanReviewStatus.pending for review in reviews):
+            return HumanReviewStatus.pending
+        if any(review.status == HumanReviewStatus.rejected for review in reviews):
+            return HumanReviewStatus.rejected
+        return HumanReviewStatus.approved
+
+    def _apply_human_review_resume(
+        self,
+        state: OpsGraphState,
+        resume_value: Any,
+    ) -> None:
+        task_id = self._task_id(state)
+        if not task_id or state.response is None:
+            return
+
+        reviews = self._human_reviews_for_current_run(state, task_id)
+        if not reviews:
+            return
+
+        state.human_review_requests = [
+            review.model_dump(mode="json")
+            for review in reviews
+        ]
         state.response.metadata["human_review"] = {
             "required": True,
-            "status": review.status.value,
-            "review_ids": [review.review_id],
+            "status": self._human_review_status(reviews).value,
+            "review_ids": [review.review_id for review in reviews],
             "requests": state.human_review_requests,
+            "resume": resume_value if isinstance(resume_value, dict) else {"value": resume_value},
         }
-        self.checkpoint_store.append_event(
-            task_id=task_id,
-            event_type=DiagnosisTaskEventType.human_review_requested,
-            message="Human review requested for high-risk proposed actions.",
-            data={
-                "review_id": review.review_id,
-                "proposed_actions": review.proposed_actions,
-                "risk_reasons": review.risk_reasons,
-            },
-        )
-        raise GraphExecutionPaused(review_ids=[review.review_id], response=state.response)
 
     async def _persist_incident_node(self, state: OpsGraphState) -> None:
         if state.response is None:

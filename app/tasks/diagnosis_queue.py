@@ -386,20 +386,29 @@ class DiagnosisTaskQueue:
                 should_cancel=self.task_store.is_cancel_requested,
             )
             if should_resume_after_review:
-                checkpoint = self._latest_paused_checkpoint(task.task_id, task.run_id)
-                if checkpoint is None:
-                    raise RuntimeError("Waiting review task has no paused checkpoint.")
-                response = await agent.resume(
-                    checkpoint=checkpoint,
-                    question=task.question,
-                    session_id=task.session_id,
-                    service=task.service,
-                    severity=task.severity,
-                    labels=task.labels,
-                    trigger_metadata=trigger_metadata,
-                    thread_id=task.thread_id,
-                    run_id=task.run_id,
-                )
+                if self._should_use_native_review_resume(task):
+                    if task.thread_id is None:
+                        raise RuntimeError("Waiting review task has no LangGraph thread id.")
+                    response = await agent.resume_interrupt(
+                        thread_id=task.thread_id,
+                        run_id=task.run_id,
+                        resume_value=self._human_review_resume_value(task),
+                    )
+                else:
+                    checkpoint = self._latest_paused_checkpoint(task.task_id, task.run_id)
+                    if checkpoint is None:
+                        raise RuntimeError("Waiting review task has no paused checkpoint.")
+                    response = await agent.resume(
+                        checkpoint=checkpoint,
+                        question=task.question,
+                        session_id=task.session_id,
+                        service=task.service,
+                        severity=task.severity,
+                        labels=task.labels,
+                        trigger_metadata=trigger_metadata,
+                        thread_id=task.thread_id,
+                        run_id=task.run_id,
+                    )
             elif task.resume_of_task_id:
                 checkpoint = self._resume_checkpoint(task)
                 response = await agent.resume(
@@ -596,6 +605,41 @@ class DiagnosisTaskQueue:
             review.status == HumanReviewStatus.approved
             for review in reviews
         )
+
+    def _should_use_native_review_resume(self, task: DiagnosisTaskRecord) -> bool:
+        if task.result is None:
+            return False
+
+        graph_runtime = task.result.metadata.get("graph_runtime")
+        if not isinstance(graph_runtime, dict):
+            return False
+
+        return (
+            graph_runtime.get("used") == "langgraph"
+            and graph_runtime.get("checkpointer_used") not in {None, "disabled", "not_used"}
+        )
+
+    def _human_review_resume_value(self, task: DiagnosisTaskRecord) -> dict[str, Any]:
+        reviews = self.task_store.list_human_review_requests_for_task(task.task_id)
+        return {
+            "approved": True,
+            "task_id": task.task_id,
+            "thread_id": task.thread_id,
+            "run_id": task.run_id,
+            "review_ids": [review.review_id for review in reviews],
+            "decisions": [
+                {
+                    "review_id": review.review_id,
+                    "status": review.status.value,
+                    "reviewer": review.reviewer,
+                    "reason": review.decision_reason,
+                    "decided_at": review.decided_at.isoformat()
+                    if review.decided_at
+                    else None,
+                }
+                for review in reviews
+            ],
+        }
 
     def _sync_human_review_metadata(self, task_id: str, response: ChatResponse) -> None:
         reviews = self.task_store.list_human_review_requests_for_task(task_id)

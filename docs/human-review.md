@@ -21,15 +21,20 @@ OpsGraph diagnosis
   -> build response
   -> human_review_gate
        -> no risky action: continue
-       -> risky action: create pending review request
+       -> risky action: create pending review request and pause task
   -> persist incident and diagnosis
 ```
 
-The diagnosis task can still finish successfully. The review request means:
+When the gate pauses, the task status becomes:
 
 ```text
-Diagnosis is complete. Proposed execution still needs human approval.
+waiting_review
 ```
+
+The diagnosis draft is stored on the task result, but incident persistence waits
+until approval. Approving the review resumes the task from the paused graph
+checkpoint. Rejecting the review marks the task failed and keeps the rejection
+reason on the task.
 
 ## APIs
 

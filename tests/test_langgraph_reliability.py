@@ -150,6 +150,24 @@ def test_ops_graph_uses_langgraph_memory_checkpointer(monkeypatch: pytest.Monkey
     assert task["status"] == "succeeded"
     assert task["result"]["metadata"]["graph_runtime"]["used"] == "langgraph"
     assert task["result"]["metadata"]["graph_runtime"]["checkpointer_used"] == "memory"
+    assert task["result"]["metadata"]["graph_runtime"]["reason"] == "native_interrupt_resume"
+    assert task["result"]["metadata"]["human_review"]["resume"]["approved"] is True
+
+    reviews_response = client.get(f"/api/tasks/{task_id}/reviews")
+    assert reviews_response.status_code == 200
+    reviews = reviews_response.json()
+    assert len(reviews) == 1
+    assert reviews[0]["status"] == "approved"
+
+    checkpoints_response = client.get(f"/api/tasks/{task_id}/checkpoints")
+    assert checkpoints_response.status_code == 200
+    human_review_statuses = [
+        checkpoint["status"]
+        for checkpoint in checkpoints_response.json()
+        if checkpoint["node_name"] == "human_review_gate"
+    ]
+    assert "paused" in human_review_statuses
+    assert "completed" in human_review_statuses
 
 
 def _approve_pending_reviews(task_id: str) -> dict:
