@@ -1,6 +1,8 @@
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date, datetime
+from enum import Enum
 from importlib.util import find_spec
 from typing import Any
 from uuid import uuid4
@@ -260,7 +262,7 @@ class OpsGraphWorkflow:
         state.graph_checkpointer = checkpointer_name
         result = await asyncio.to_thread(
             compiled_graph.invoke,
-            {"ops_state": state},
+            self._langgraph_input(state),
             self._langgraph_config(state.thread_id, state.run_id),
         )
         self._apply_langgraph_result(result, state)
@@ -316,6 +318,9 @@ class OpsGraphWorkflow:
             },
         }
 
+    def _langgraph_input(self, state: OpsGraphState) -> dict[str, Any]:
+        return {"ops_state": self._state_snapshot(state)}
+
     def _apply_langgraph_result(
         self,
         result: dict[str, Any],
@@ -333,9 +338,11 @@ class OpsGraphWorkflow:
 
     def _final_state_from_langgraph_result(self, result: dict[str, Any]) -> OpsGraphState:
         final_state = result.get("ops_state")
-        if not isinstance(final_state, OpsGraphState):
-            raise RuntimeError("LangGraph did not return an OpsGraphState.")
-        return final_state
+        if isinstance(final_state, OpsGraphState):
+            return final_state
+        if isinstance(final_state, dict):
+            return self._state_from_snapshot(final_state)
+        raise RuntimeError("LangGraph did not return an OpsGraphState.")
 
     def _review_ids_from_interrupts(self, interrupts: list[Any]) -> list[str]:
         review_ids: list[str] = []
@@ -353,14 +360,22 @@ class OpsGraphWorkflow:
         node: Callable[[OpsGraphState], Any],
     ) -> Callable[[dict[str, Any]], Any]:
         def wrapped(raw_state: dict[str, Any]) -> dict[str, Any]:
-            ops_state = raw_state["ops_state"]
+            ops_state = self._state_from_langgraph_payload(raw_state.get("ops_state"))
             if self._should_use_native_human_review_interrupt(ops_state, name):
-                self._run_native_human_review_gate_node(ops_state, name)
+                self._run_native_human_review_gate_node(ops_state, name, raw_state)
             else:
                 asyncio.run(self._run_node(ops_state, name, node))
-            return {"ops_state": ops_state}
+                raw_state["ops_state"] = self._state_snapshot(ops_state)
+            return {"ops_state": raw_state["ops_state"]}
 
         return wrapped
+
+    def _state_from_langgraph_payload(self, value: Any) -> OpsGraphState:
+        if isinstance(value, OpsGraphState):
+            return value
+        if isinstance(value, dict):
+            return self._state_from_snapshot(value)
+        raise RuntimeError("LangGraph node state did not contain a valid ops_state.")
 
     def _is_langgraph_available(self) -> bool:
         return find_spec("langgraph") is not None
@@ -458,11 +473,11 @@ class OpsGraphWorkflow:
             "requested_service": state.requested_service,
             "service": state.service,
             "alert_severity": state.alert_severity.value if state.alert_severity else None,
-            "alert_labels": state.alert_labels,
-            "trigger_metadata": state.trigger_metadata,
+            "alert_labels": _json_safe(state.alert_labels),
+            "trigger_metadata": _json_safe(state.trigger_metadata),
             "plan_trace": _dump_model(state.plan_trace) if state.plan_trace else None,
             "selected_tool_calls": [_dump_model(call) for call in state.selected_tool_calls],
-            "tool_selection_metadata": state.tool_selection_metadata,
+            "tool_selection_metadata": _json_safe(state.tool_selection_metadata),
             "react_steps": [_dump_model(step) for step in state.react_steps],
             "tool_results": [_dump_model(result) for result in state.tool_results],
             "knowledge_response": _dump_model(state.knowledge_response)
@@ -487,9 +502,9 @@ class OpsGraphWorkflow:
             "has_plan_trace": state.plan_trace is not None,
             "has_fallback_report": state.fallback_report is not None,
             "has_report": state.report is not None,
-            "human_review_requests": state.human_review_requests,
+            "human_review_requests": _json_safe(state.human_review_requests),
             "has_response": state.response is not None,
-            "summary_metadata": state.summary_metadata,
+            "summary_metadata": _json_safe(state.summary_metadata),
             "graph_runtime": state.graph_runtime,
             "graph_runtime_reason": state.graph_runtime_reason,
             "graph_checkpointer": state.graph_checkpointer,
@@ -509,15 +524,49 @@ class OpsGraphWorkflow:
         run_id: str,
     ) -> OpsGraphState:
         snapshot = checkpoint.state if checkpoint else {}
-        state = OpsGraphState(
-            question=str(snapshot.get("question") or question),
-            session_id=str(snapshot.get("session_id") or session_id),
+        state = self._state_from_snapshot(
+            snapshot=snapshot,
+            question=question,
+            session_id=session_id,
+            service=service,
+            alert_severity=alert_severity,
+            alert_labels=alert_labels,
+            trigger_metadata=trigger_metadata,
             thread_id=thread_id,
             run_id=run_id,
+        )
+        state.thread_id = thread_id
+        state.run_id = run_id
+        state.trigger_metadata = trigger_metadata
+        return state
+
+    def _state_from_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        question: str | None = None,
+        session_id: str | None = None,
+        service: str | None = None,
+        alert_severity: AlertSeverity | None = None,
+        alert_labels: dict[str, str] | None = None,
+        trigger_metadata: dict[str, Any] | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+    ) -> OpsGraphState:
+        return OpsGraphState(
+            question=str(snapshot.get("question") or question or ""),
+            session_id=str(snapshot.get("session_id") or session_id or "default"),
+            thread_id=str(snapshot.get("thread_id") or thread_id)
+            if snapshot.get("thread_id") or thread_id
+            else None,
+            run_id=str(snapshot.get("run_id") or run_id)
+            if snapshot.get("run_id") or run_id
+            else None,
             requested_service=snapshot.get("requested_service") or service,
             alert_severity=_alert_severity(snapshot.get("alert_severity"), alert_severity),
-            alert_labels=snapshot.get("alert_labels") or alert_labels,
-            trigger_metadata=trigger_metadata,
+            alert_labels=snapshot.get("alert_labels") or alert_labels or {},
+            trigger_metadata=trigger_metadata
+            if trigger_metadata is not None
+            else snapshot.get("trigger_metadata") or {},
             service=snapshot.get("service") or service,
             plan_trace=_optional_model(snapshot.get("plan_trace"), PlanTrace),
             selected_tool_calls=_model_list(snapshot.get("selected_tool_calls"), ToolCall),
@@ -533,8 +582,8 @@ class OpsGraphWorkflow:
             graph_runtime=snapshot.get("graph_runtime") or "local",
             graph_runtime_reason=snapshot.get("graph_runtime_reason") or "restored",
             graph_checkpointer=snapshot.get("graph_checkpointer") or "not_used",
+            graph_trace=snapshot.get("graph_trace") or [],
         )
-        return state
 
     def _remaining_nodes_after(
         self,
@@ -695,6 +744,7 @@ class OpsGraphWorkflow:
         self,
         state: OpsGraphState,
         node_name: str,
+        raw_state: dict[str, Any],
     ) -> None:
         from langgraph.types import interrupt
 
@@ -705,12 +755,15 @@ class OpsGraphWorkflow:
         if payload is None:
             self._refresh_response_identity(state)
             self._save_checkpoint(state, node_name, "completed")
+            raw_state["ops_state"] = self._state_snapshot(state)
             return
 
+        raw_state["ops_state"] = self._state_snapshot(state)
         resume_value = interrupt(payload)
         self._apply_human_review_resume(state, resume_value)
         self._refresh_response_identity(state)
         self._save_checkpoint(state, node_name, "completed")
+        raw_state["ops_state"] = self._state_snapshot(state)
 
     def _prepare_human_review_gate(self, state: OpsGraphState) -> dict[str, Any] | None:
         if state.response is None:
@@ -901,8 +954,27 @@ class OpsGraphWorkflow:
 def _dump_model(value: Any) -> Any:
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
-        return model_dump(mode="json")
-    return value
+        return _json_safe(model_dump(mode="json"))
+    return _json_safe(value)
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [_json_safe(item) for item in value]
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return _json_safe(model_dump(mode="json"))
+
+    return str(value)
 
 
 def _optional_model(value: Any, model_type: type[Any]) -> Any | None:

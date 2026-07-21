@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     diagnosis_task_recovery_limit: int = 50
     ops_graph_runtime: str = "local"
     ops_graph_checkpointer: str = "memory"
+    ops_graph_checkpoint_db_path: str = "app/data/langgraph_checkpoints.sqlite"
     knowledge_retriever_mode: str = "keyword"
 
     model_config = SettingsConfigDict(

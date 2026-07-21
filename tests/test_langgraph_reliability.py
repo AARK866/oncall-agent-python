@@ -1,8 +1,14 @@
+import json
+from datetime import datetime
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.agents.langgraph_checkpointing import (
+    create_langgraph_checkpointer,
+    is_sqlite_checkpointer_available,
+)
 from app.agents.ops_graph import OpsGraphState, OpsGraphWorkflow
 from app.config import settings
 from app.main import app
@@ -170,6 +176,48 @@ def test_ops_graph_uses_langgraph_memory_checkpointer(monkeypatch: pytest.Monkey
     assert "completed" in human_review_statuses
 
 
+def test_langgraph_state_payload_is_json_serializable(tmp_path) -> None:
+    workflow = _minimal_workflow(tmp_path)
+    state = OpsGraphState(
+        question="payment service 5xx is high",
+        session_id="json-safe-state",
+        thread_id="thread-json-safe",
+        run_id="run-json-safe",
+        requested_service="payment-api",
+        alert_severity=AlertSeverity.critical,
+        trigger_metadata={
+            "source": "test",
+            "created_at": datetime(2026, 7, 21, 10, 0, 0),
+        },
+    )
+
+    payload = workflow._langgraph_input(state)
+    encoded = json.dumps(payload, ensure_ascii=False)
+    restored = workflow._final_state_from_langgraph_result(json.loads(encoded))
+
+    assert restored.question == state.question
+    assert restored.thread_id == state.thread_id
+    assert restored.alert_severity == AlertSeverity.critical
+    assert restored.trigger_metadata["created_at"] == "2026-07-21T10:00:00"
+
+
+def test_sqlite_langgraph_checkpointer_requires_optional_package(tmp_path) -> None:
+    if is_sqlite_checkpointer_available():
+        checkpointer, name = create_langgraph_checkpointer(
+            "sqlite",
+            sqlite_path=str(tmp_path / "langgraph-checkpoints.sqlite"),
+        )
+        assert checkpointer is not None
+        assert name == "sqlite"
+        return
+
+    with pytest.raises(RuntimeError, match="langgraph-checkpoint-sqlite"):
+        create_langgraph_checkpointer(
+            "sqlite",
+            sqlite_path=str(tmp_path / "langgraph-checkpoints.sqlite"),
+        )
+
+
 def _approve_pending_reviews(task_id: str) -> dict:
     reviews_response = client.get(f"/api/tasks/{task_id}/reviews")
     assert reviews_response.status_code == 200
@@ -188,3 +236,18 @@ def _approve_pending_reviews(task_id: str) -> dict:
     response = client.get(f"/api/tasks/{task_id}")
     assert response.status_code == 200
     return response.json()
+
+
+def _minimal_workflow(tmp_path) -> OpsGraphWorkflow:
+    return OpsGraphWorkflow(
+        tool_registry=ToolRegistry(),
+        knowledge_agent=object(),
+        react_loop=object(),
+        plan_execute=object(),
+        llm_ops_assistant=object(),
+        infer_service=lambda question: "payment-api",
+        build_report=lambda service, tool_results, runbook_answer: object(),
+        format_report=lambda report: "",
+        persist_analysis=lambda *args: None,
+        checkpoint_store=SQLiteTaskStore(tmp_path / "minimal-workflow.db"),
+    )

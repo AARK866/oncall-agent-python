@@ -25,8 +25,18 @@ OPS_GRAPH_CHECKPOINTER=memory
 Supported values:
 
 - `memory`: use LangGraph's in-process `MemorySaver`;
+- `sqlite`: use LangGraph's SQLite checkpointer when
+  `langgraph-checkpoint-sqlite` is installed;
 - `auto`: use `MemorySaver` when available;
 - `disabled`: compile LangGraph without a checkpointer.
+
+SQLite configuration:
+
+```env
+OPS_GRAPH_RUNTIME=langgraph
+OPS_GRAPH_CHECKPOINTER=sqlite
+OPS_GRAPH_CHECKPOINT_DB_PATH=app/data/langgraph_checkpoints.sqlite
+```
 
 ## Response Metadata
 
@@ -56,8 +66,19 @@ checkpointer_used = memory
 contract and supports resume while the same API process is alive, but it is not
 a durable production backend.
 
-For production, replace it with a durable LangGraph checkpointer such as SQLite
-or Postgres when the matching package is installed.
+For production-like local deployment, use `sqlite`. For a clustered production
+deployment, replace SQLite with a durable shared backend such as Postgres when
+the matching LangGraph checkpointer package is installed.
+
+The state sent into LangGraph is JSON-friendly:
+
+```text
+dict/list/str/number/bool/null
+```
+
+The application restores that snapshot into `OpsGraphState` only inside node
+execution. This avoids persisting app-specific Python objects such as Pydantic
+models or enums in the LangGraph checkpoint stream.
 
 ## Why It Matters
 
