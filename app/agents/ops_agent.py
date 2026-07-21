@@ -41,6 +41,7 @@ class OpsAgent:
             format_report=self._format_report,
             persist_analysis=self._persist_analysis,
             graph_runtime=settings.ops_graph_runtime,
+            graph_checkpointer=settings.ops_graph_checkpointer,
             should_cancel=should_cancel,
         )
 

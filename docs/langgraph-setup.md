@@ -38,6 +38,7 @@ After `langgraph` is installed, edit `.env`:
 
 ```env
 OPS_GRAPH_RUNTIME=langgraph
+OPS_GRAPH_CHECKPOINTER=memory
 ```
 
 Then start the API:
@@ -60,10 +61,12 @@ Check response metadata:
 
 ```text
 metadata.graph_runtime.used
+metadata.graph_runtime.checkpointer_used
 metadata.graph_trace
 ```
 
-If `used` is `langgraph`, the request ran through LangGraph.
+If `used` is `langgraph` and `checkpointer_used` is `memory`, the request ran
+through LangGraph with its native checkpointer interface enabled.
 
 ## 4. Safe Fallback
 
@@ -74,3 +77,15 @@ OPS_GRAPH_RUNTIME=auto
 ```
 
 In `auto` mode, the app tries LangGraph first. If `langgraph` is not installed or fails at runtime, it falls back to the local graph workflow.
+
+## 5. Checkpointer Modes
+
+```env
+OPS_GRAPH_CHECKPOINTER=memory
+```
+
+Supported values:
+
+- `memory`: LangGraph `MemorySaver`, process-local;
+- `auto`: use memory when available;
+- `disabled`: run LangGraph without a native checkpointer.

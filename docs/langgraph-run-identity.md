@@ -58,10 +58,9 @@ config.metadata.thread_id = thread_id
 config.metadata.run_id = run_id
 ```
 
-The current implementation still keeps our SQLite checkpoint records because
-they are easy to inspect through the task API. The next deep LangGraph step can
-bind this identity to a LangGraph-native checkpointer and resume from the same
-thread.
+The implementation still keeps our SQLite checkpoint records because they are
+easy to inspect through the task API. When `OPS_GRAPH_RUNTIME=langgraph`, the
+same identity is also passed into LangGraph's native checkpointer config.
 
 ## Why It Matters
 

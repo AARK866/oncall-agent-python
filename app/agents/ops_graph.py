@@ -4,6 +4,7 @@ from importlib.util import find_spec
 from typing import Any
 from uuid import uuid4
 
+from app.agents.langgraph_checkpointing import create_langgraph_checkpointer
 from app.agents.knowledge_agent import KnowledgeAgent
 from app.agents.llm_ops_assistant import LLMOpsAssistant
 from app.agents.plan_execute import PlanExecuteReplan
@@ -53,6 +54,7 @@ class OpsGraphState:
     graph_trace: list[str] = field(default_factory=list)
     graph_runtime: str = "local"
     graph_runtime_reason: str = "default"
+    graph_checkpointer: str = "not_used"
 
 
 class OpsGraphWorkflow:
@@ -73,6 +75,7 @@ class OpsGraphWorkflow:
             None,
         ],
         graph_runtime: str = "local",
+        graph_checkpointer: str = "memory",
         checkpoint_store: SQLiteTaskStore | None = None,
         should_cancel: Callable[[str], bool] | None = None,
     ) -> None:
@@ -86,6 +89,7 @@ class OpsGraphWorkflow:
         self.format_report = format_report
         self.persist_analysis = persist_analysis
         self.graph_runtime = graph_runtime
+        self.graph_checkpointer = graph_checkpointer
         self.checkpoint_store = checkpoint_store or SQLiteTaskStore.from_settings()
         self.should_cancel = should_cancel
 
@@ -145,6 +149,7 @@ class OpsGraphWorkflow:
     ) -> None:
         state.graph_runtime = "local"
         state.graph_runtime_reason = reason
+        state.graph_checkpointer = "not_used"
         for name, node in nodes:
             await self._run_node(state, name, node)
 
@@ -188,7 +193,9 @@ class OpsGraphWorkflow:
 
         state.graph_runtime = "langgraph"
         state.graph_runtime_reason = "configured_langgraph"
-        compiled_graph = graph.compile()
+        checkpointer, checkpointer_name = create_langgraph_checkpointer(self.graph_checkpointer)
+        state.graph_checkpointer = checkpointer_name
+        compiled_graph = graph.compile(checkpointer=checkpointer)
         result = await compiled_graph.ainvoke(
             {"ops_state": state},
             config={
@@ -330,6 +337,7 @@ class OpsGraphWorkflow:
             "summary_metadata": state.summary_metadata,
             "graph_runtime": state.graph_runtime,
             "graph_runtime_reason": state.graph_runtime_reason,
+            "graph_checkpointer": state.graph_checkpointer,
             "graph_trace": state.graph_trace,
         }
 
@@ -424,6 +432,8 @@ class OpsGraphWorkflow:
                     "requested": self.graph_runtime,
                     "used": state.graph_runtime,
                     "reason": state.graph_runtime_reason,
+                    "checkpointer_requested": self.graph_checkpointer,
+                    "checkpointer_used": state.graph_checkpointer,
                     "langgraph_available": self._is_langgraph_available(),
                 },
             },

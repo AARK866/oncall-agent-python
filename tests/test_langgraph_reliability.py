@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agents.ops_graph import OpsGraphState, OpsGraphWorkflow
+from app.config import settings
 from app.main import app
 from app.schemas import AlertSeverity, DiagnosisTaskEventType
 from app.storage import SQLiteTaskStore
@@ -116,3 +117,28 @@ async def test_ops_graph_records_failed_checkpoint_for_node_error(tmp_path) -> N
     assert checkpoints[-1].node_name == "explode"
     assert checkpoints[-1].error == "boom"
     assert events[-1].event_type == DiagnosisTaskEventType.graph_node_failed
+
+
+def test_ops_graph_uses_langgraph_memory_checkpointer(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("langgraph")
+    monkeypatch.setattr(settings, "ops_graph_runtime", "langgraph")
+    monkeypatch.setattr(settings, "ops_graph_checkpointer", "memory")
+
+    response = client.post(
+        "/api/alerts/analyze",
+        json={
+            "alert_id": f"native-checkpoint-payment-5xx-{uuid4().hex}",
+            "title": "High5xxRate",
+            "service": "payment-api",
+            "severity": "critical",
+            "annotations": {"summary": "payment-api has elevated 5xx"},
+        },
+    )
+
+    assert response.status_code == 202
+    task_id = response.json()["tasks"][0]["task_id"]
+    task = client.get(f"/api/tasks/{task_id}").json()
+
+    assert task["status"] == "succeeded"
+    assert task["result"]["metadata"]["graph_runtime"]["used"] == "langgraph"
+    assert task["result"]["metadata"]["graph_runtime"]["checkpointer_used"] == "memory"

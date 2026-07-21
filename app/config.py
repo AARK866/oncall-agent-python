@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     diagnosis_task_timeout_seconds: int = 900
     diagnosis_task_recovery_limit: int = 50
     ops_graph_runtime: str = "local"
+    ops_graph_checkpointer: str = "memory"
     knowledge_retriever_mode: str = "keyword"
 
     model_config = SettingsConfigDict(
