@@ -61,6 +61,10 @@ def test_sqlite_task_store_records_task_events(tmp_path) -> None:
         severity=AlertSeverity.critical,
     )
 
+    assert task.thread_id is not None
+    assert task.thread_id.startswith("thread_")
+    assert task.run_id is not None
+    assert task.run_id.startswith("run_")
     store.mark_running(task.task_id)
     store.append_event(
         task_id=task.task_id,
@@ -104,12 +108,16 @@ def test_sqlite_task_store_records_graph_checkpoints(tmp_path) -> None:
 
     store.save_graph_checkpoint(
         task_id=task.task_id,
+        thread_id=task.thread_id,
+        run_id=task.run_id,
         node_name="infer_service",
         status="started",
         state={"session_id": "checkpoint-storage-test"},
     )
     store.save_graph_checkpoint(
         task_id=task.task_id,
+        thread_id=task.thread_id,
+        run_id=task.run_id,
         node_name="infer_service",
         status="completed",
         state={"service": "payment-api"},
@@ -118,6 +126,8 @@ def test_sqlite_task_store_records_graph_checkpoints(tmp_path) -> None:
     checkpoints = store.list_graph_checkpoints(task.task_id)
 
     assert [checkpoint.status for checkpoint in checkpoints] == ["started", "completed"]
+    assert checkpoints[0].thread_id == task.thread_id
+    assert checkpoints[0].run_id == task.run_id
     assert checkpoints[0].node_name == "infer_service"
     assert checkpoints[1].state["service"] == "payment-api"
 

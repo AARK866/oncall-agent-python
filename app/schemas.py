@@ -169,6 +169,8 @@ class DiagnosisTaskRecord(BaseModel):
     task_id: str
     alert_group_id: str | None = None
     rerun_of_task_id: str | None = None
+    thread_id: str | None = None
+    run_id: str | None = None
     source: str
     status: DiagnosisTaskStatus
     question: str
@@ -219,6 +221,8 @@ class DiagnosisTaskEventRecord(BaseModel):
 class OpsGraphCheckpointRecord(BaseModel):
     checkpoint_id: str
     task_id: str
+    thread_id: str | None = None
+    run_id: str | None = None
     node_name: str
     status: str
     state: dict[str, Any] = Field(default_factory=dict)

@@ -83,6 +83,8 @@ def test_ops_agent_returns_diagnosis_with_traces() -> None:
     ]
     assert response.metadata["graph_runtime"]["requested"] == "local"
     assert response.metadata["graph_runtime"]["used"] == "local"
+    assert response.metadata["graph_run"]["thread_id"] == "thread_session_test"
+    assert response.metadata["graph_run"]["run_id"].startswith("run_")
     assert len(response.metadata["react_steps"]) == 5
     assert len(response.metadata["plan_trace"]["plan"]) == 4
     assert response.metadata["human_review"]["required"] is True

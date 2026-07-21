@@ -28,6 +28,7 @@ def test_alert_task_records_ops_graph_checkpoints() -> None:
 
     assert response.status_code == 202
     task_id = response.json()["tasks"][0]["task_id"]
+    task = client.get(f"/api/tasks/{task_id}").json()
 
     checkpoints_response = client.get(f"/api/tasks/{task_id}/checkpoints")
     assert checkpoints_response.status_code == 200
@@ -50,8 +51,18 @@ def test_alert_task_records_ops_graph_checkpoints() -> None:
         "human_review_gate",
         "persist_incident",
     ]
+    assert task["thread_id"].startswith("thread_ag_")
+    assert task["run_id"].startswith("run_")
+    assert all(checkpoint["thread_id"] == task["thread_id"] for checkpoint in checkpoints)
+    assert all(checkpoint["run_id"] == task["run_id"] for checkpoint in checkpoints)
     assert checkpoints[0]["state"]["session_id"].startswith("alert-")
+    assert checkpoints[0]["state"]["thread_id"] == task["thread_id"]
+    assert checkpoints[0]["state"]["run_id"] == task["run_id"]
     assert checkpoints[-1]["state"]["has_response"] is True
+    assert task["result"]["metadata"]["graph_run"] == {
+        "thread_id": task["thread_id"],
+        "run_id": task["run_id"],
+    }
 
 
 @pytest.mark.anyio
@@ -64,6 +75,8 @@ async def test_ops_graph_records_failed_checkpoint_for_node_error(tmp_path) -> N
         service="payment-api",
         severity=AlertSeverity.critical,
     )
+    assert task.thread_id is not None
+    assert task.run_id is not None
     workflow = OpsGraphWorkflow(
         tool_registry=ToolRegistry(),
         knowledge_agent=object(),
@@ -79,8 +92,14 @@ async def test_ops_graph_records_failed_checkpoint_for_node_error(tmp_path) -> N
     state = OpsGraphState(
         question="payment service 5xx is high",
         session_id="graph-failure-test",
-        trigger_metadata={"task_id": task.task_id},
+        trigger_metadata={
+            "task_id": task.task_id,
+            "thread_id": task.thread_id,
+            "run_id": task.run_id,
+        },
     )
+    state.thread_id = task.thread_id
+    state.run_id = task.run_id
 
     async def failing_node(_: OpsGraphState) -> None:
         raise RuntimeError("boom")
@@ -92,6 +111,8 @@ async def test_ops_graph_records_failed_checkpoint_for_node_error(tmp_path) -> N
     events = store.list_events(task.task_id)
 
     assert [checkpoint.status for checkpoint in checkpoints] == ["started", "failed"]
+    assert checkpoints[-1].thread_id == task.thread_id
+    assert checkpoints[-1].run_id == task.run_id
     assert checkpoints[-1].node_name == "explode"
     assert checkpoints[-1].error == "boom"
     assert events[-1].event_type == DiagnosisTaskEventType.graph_node_failed

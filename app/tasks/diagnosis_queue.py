@@ -51,6 +51,8 @@ class DiagnosisTaskQueue:
         session_id: str,
         alert_group_id: str | None = None,
         rerun_of_task_id: str | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
         service: str | None = None,
         severity: AlertSeverity = AlertSeverity.warning,
         labels: dict[str, str] | None = None,
@@ -62,6 +64,8 @@ class DiagnosisTaskQueue:
             session_id=session_id,
             alert_group_id=alert_group_id,
             rerun_of_task_id=rerun_of_task_id,
+            thread_id=thread_id,
+            run_id=run_id,
             service=service,
             severity=severity,
             labels=labels,
@@ -119,6 +123,7 @@ class DiagnosisTaskQueue:
             question=question,
             session_id=session_id,
             alert_group_id=group.group_id,
+            thread_id=f"thread_{group.group_id}",
             service=service,
             severity=severity,
             labels=labels,
@@ -177,6 +182,7 @@ class DiagnosisTaskQueue:
             session_id=original.session_id,
             alert_group_id=original.alert_group_id,
             rerun_of_task_id=original.task_id,
+            thread_id=original.thread_id,
             service=original.service,
             severity=original.severity,
             labels=dict(original.labels),
@@ -293,6 +299,8 @@ class DiagnosisTaskQueue:
         trigger_metadata = dict(task.trigger_metadata)
         trigger_metadata["task_id"] = task.task_id
         trigger_metadata["task_source"] = task.source
+        trigger_metadata["thread_id"] = task.thread_id
+        trigger_metadata["run_id"] = task.run_id
         try:
             response = await OpsAgent.create_default(
                 incident_store=self.incident_store,
@@ -304,6 +312,8 @@ class DiagnosisTaskQueue:
                 severity=task.severity,
                 labels=task.labels,
                 trigger_metadata=trigger_metadata,
+                thread_id=task.thread_id,
+                run_id=task.run_id,
             )
         except GraphExecutionCancelled as exc:
             self.task_store.mark_canceled(task_id, reason=str(exc))

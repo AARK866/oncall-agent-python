@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 from typing import Any
+from uuid import uuid4
 
 from app.agents.knowledge_agent import KnowledgeAgent
 from app.agents.llm_ops_assistant import LLMOpsAssistant
@@ -31,6 +32,8 @@ class GraphExecutionCancelled(Exception):
 class OpsGraphState:
     question: str
     session_id: str
+    thread_id: str | None = None
+    run_id: str | None = None
     requested_service: str | None = None
     alert_severity: AlertSeverity | None = None
     alert_labels: dict[str, str] = field(default_factory=dict)
@@ -94,14 +97,28 @@ class OpsGraphWorkflow:
         alert_severity: AlertSeverity | None = None,
         alert_labels: dict[str, str] | None = None,
         trigger_metadata: dict[str, Any] | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
     ) -> ChatResponse:
+        metadata = dict(trigger_metadata or {})
+        resolved_thread_id = str(
+            thread_id
+            or metadata.get("thread_id")
+            or self._default_thread_id(session_id)
+        )
+        resolved_run_id = str(run_id or metadata.get("run_id") or f"run_{uuid4().hex}")
+        metadata.setdefault("thread_id", resolved_thread_id)
+        metadata.setdefault("run_id", resolved_run_id)
+
         state = OpsGraphState(
             question=question,
             session_id=session_id,
+            thread_id=resolved_thread_id,
+            run_id=resolved_run_id,
             requested_service=service,
             alert_severity=alert_severity,
             alert_labels=alert_labels or {},
-            trigger_metadata=trigger_metadata or {},
+            trigger_metadata=metadata,
         )
         nodes = self._nodes()
         state.graph_trace = [name for name, _ in nodes]
@@ -172,7 +189,16 @@ class OpsGraphWorkflow:
         state.graph_runtime = "langgraph"
         state.graph_runtime_reason = "configured_langgraph"
         compiled_graph = graph.compile()
-        result = await compiled_graph.ainvoke({"ops_state": state})
+        result = await compiled_graph.ainvoke(
+            {"ops_state": state},
+            config={
+                "configurable": {"thread_id": state.thread_id},
+                "metadata": {
+                    "thread_id": state.thread_id,
+                    "run_id": state.run_id,
+                },
+            },
+        )
         final_state = result.get("ops_state")
         if not isinstance(final_state, OpsGraphState):
             raise RuntimeError("LangGraph did not return an OpsGraphState.")
@@ -234,6 +260,8 @@ class OpsGraphWorkflow:
             status=status,
             state=self._state_snapshot(state),
             error=error,
+            thread_id=state.thread_id,
+            run_id=state.run_id,
         )
         self._append_graph_event(task_id, node_name, status, error)
 
@@ -273,6 +301,8 @@ class OpsGraphWorkflow:
         return {
             "question": state.question,
             "session_id": state.session_id,
+            "thread_id": state.thread_id,
+            "run_id": state.run_id,
             "requested_service": state.requested_service,
             "service": state.service,
             "alert_severity": state.alert_severity.value if state.alert_severity else None,
@@ -385,6 +415,10 @@ class OpsGraphWorkflow:
                 "llm_tool_selection": state.tool_selection_metadata,
                 "llm_summary": state.summary_metadata,
                 "trigger": state.trigger_metadata,
+                "graph_run": {
+                    "thread_id": state.thread_id,
+                    "run_id": state.run_id,
+                },
                 "graph_trace": state.graph_trace,
                 "graph_runtime": {
                     "requested": self.graph_runtime,
@@ -426,6 +460,8 @@ class OpsGraphWorkflow:
             risk_reasons=review_plan.risk_reasons,
             metadata={
                 "session_id": state.session_id,
+                "thread_id": state.thread_id,
+                "run_id": state.run_id,
                 "trigger": state.trigger_metadata,
                 "graph_runtime": state.graph_runtime,
                 "graph_runtime_reason": state.graph_runtime_reason,
@@ -482,6 +518,13 @@ class OpsGraphWorkflow:
         if state.report is None:
             raise RuntimeError("Ops graph state has no final report yet.")
         return state.report
+
+    def _default_thread_id(self, session_id: str) -> str:
+        safe_session_id = "".join(
+            character if character.isalnum() or character in "-_" else "-"
+            for character in session_id
+        )
+        return f"thread_session_{safe_session_id[:80] or 'default'}"
 
 
 def _dump_model(value: Any) -> Any:

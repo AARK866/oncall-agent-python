@@ -52,6 +52,8 @@ You should see a `rerun_requested` event with the new task id.
 The new task stores:
 
 - `rerun_of_task_id`: direct parent task id;
+- `thread_id`: same graph thread as the original task;
+- `run_id`: new execution attempt id;
 - `trigger_metadata.rerun.of_task_id`: direct parent task id;
 - `trigger_metadata.rerun.root_task_id`: first task in the rerun chain;
 - `trigger_metadata.rerun.requested_by`: operator or system that requested it;

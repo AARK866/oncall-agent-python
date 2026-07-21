@@ -39,6 +39,8 @@ def test_succeeded_task_can_be_rerun_from_api() -> None:
     new_task = rerun_response.json()
     assert new_task["task_id"] != original_task_id
     assert new_task["rerun_of_task_id"] == original_task_id
+    assert new_task["thread_id"] == original_task["thread_id"]
+    assert new_task["run_id"] != original_task["run_id"]
     assert new_task["source"] == original_task["source"]
     assert new_task["service"] == original_task["service"]
     assert new_task["trigger_metadata"]["rerun"]["requested_by"] == "alice"

@@ -67,6 +67,8 @@ class OpsAgent:
         severity: AlertSeverity | None = None,
         labels: dict[str, str] | None = None,
         trigger_metadata: dict[str, object] | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
     ) -> ChatResponse:
         return await self.graph.run(
             question=question,
@@ -75,6 +77,8 @@ class OpsAgent:
             alert_severity=severity,
             alert_labels=labels,
             trigger_metadata=trigger_metadata,
+            thread_id=thread_id,
+            run_id=run_id,
         )
 
     def _persist_analysis(

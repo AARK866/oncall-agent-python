@@ -26,6 +26,7 @@ Docs:
 - LLM setup: `docs/llm-setup.md`
 - LangChain real LLM: `docs/langchain-real-llm.md`
 - LangGraph setup: `docs/langgraph-setup.md`
+- LangGraph run identity: `docs/langgraph-run-identity.md`
 - Vector store setup: `docs/vector-store.md`
 - Knowledge API: `docs/knowledge-api.md`
 - Knowledge ingestion: `docs/knowledge-ingestion.md`

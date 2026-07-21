@@ -40,6 +40,8 @@ class SQLiteTaskStore:
         session_id: str,
         alert_group_id: str | None = None,
         rerun_of_task_id: str | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
         service: str | None = None,
         severity: AlertSeverity = AlertSeverity.warning,
         labels: dict[str, str] | None = None,
@@ -50,6 +52,8 @@ class SQLiteTaskStore:
             task_id=f"task_{uuid4().hex}",
             alert_group_id=alert_group_id,
             rerun_of_task_id=rerun_of_task_id,
+            thread_id=thread_id or f"thread_{uuid4().hex}",
+            run_id=run_id or f"run_{uuid4().hex}",
             source=source,
             status=DiagnosisTaskStatus.queued,
             question=question,
@@ -66,12 +70,12 @@ class SQLiteTaskStore:
             connection.execute(
                 """
                 INSERT INTO diagnosis_tasks (
-                    task_id, alert_group_id, rerun_of_task_id, source, status,
-                    question, session_id, service, severity,
+                    task_id, alert_group_id, rerun_of_task_id, thread_id, run_id,
+                    source, status, question, session_id, service, severity,
                     labels_json, trigger_metadata_json, result_json, incident_id,
                     diagnosis_id, error, created_at, updated_at, started_at, finished_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 _task_values(task),
             )
@@ -428,10 +432,14 @@ class SQLiteTaskStore:
         status: str,
         state: dict[str, Any],
         error: str | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
     ) -> OpsGraphCheckpointRecord:
         checkpoint = OpsGraphCheckpointRecord(
             checkpoint_id=f"chk_{uuid4().hex}",
             task_id=task_id,
+            thread_id=thread_id,
+            run_id=run_id,
             node_name=node_name,
             status=status,
             state=state,
@@ -442,9 +450,10 @@ class SQLiteTaskStore:
             connection.execute(
                 """
                 INSERT INTO ops_graph_checkpoints (
-                    checkpoint_id, task_id, node_name, status, state_json, error, created_at
+                    checkpoint_id, task_id, thread_id, run_id, node_name, status,
+                    state_json, error, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 _checkpoint_values(checkpoint),
             )
@@ -718,6 +727,8 @@ class SQLiteTaskStore:
                     task_id TEXT PRIMARY KEY,
                     alert_group_id TEXT,
                     rerun_of_task_id TEXT,
+                    thread_id TEXT,
+                    run_id TEXT,
                     source TEXT NOT NULL,
                     status TEXT NOT NULL,
                     question TEXT NOT NULL,
@@ -739,10 +750,18 @@ class SQLiteTaskStore:
             )
             _ensure_column(connection, "diagnosis_tasks", "alert_group_id", "TEXT")
             _ensure_column(connection, "diagnosis_tasks", "rerun_of_task_id", "TEXT")
+            _ensure_column(connection, "diagnosis_tasks", "thread_id", "TEXT")
+            _ensure_column(connection, "diagnosis_tasks", "run_id", "TEXT")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_diagnosis_tasks_rerun_of
                 ON diagnosis_tasks (rerun_of_task_id, created_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_diagnosis_tasks_thread_created
+                ON diagnosis_tasks (thread_id, created_at)
                 """
             )
             connection.execute(
@@ -792,6 +811,8 @@ class SQLiteTaskStore:
                 CREATE TABLE IF NOT EXISTS ops_graph_checkpoints (
                     checkpoint_id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL,
+                    thread_id TEXT,
+                    run_id TEXT,
                     node_name TEXT NOT NULL,
                     status TEXT NOT NULL,
                     state_json TEXT NOT NULL,
@@ -805,6 +826,14 @@ class SQLiteTaskStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_ops_graph_checkpoints_task_created
                 ON ops_graph_checkpoints (task_id, created_at)
+                """
+            )
+            _ensure_column(connection, "ops_graph_checkpoints", "thread_id", "TEXT")
+            _ensure_column(connection, "ops_graph_checkpoints", "run_id", "TEXT")
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_ops_graph_checkpoints_thread_run
+                ON ops_graph_checkpoints (thread_id, run_id, created_at)
                 """
             )
             connection.execute(
@@ -849,6 +878,8 @@ def _task_values(task: DiagnosisTaskRecord) -> tuple[Any, ...]:
         task.task_id,
         task.alert_group_id,
         task.rerun_of_task_id,
+        task.thread_id,
+        task.run_id,
         task.source,
         task.status.value,
         task.question,
@@ -905,6 +936,8 @@ def _checkpoint_values(checkpoint: OpsGraphCheckpointRecord) -> tuple[Any, ...]:
     return (
         checkpoint.checkpoint_id,
         checkpoint.task_id,
+        checkpoint.thread_id,
+        checkpoint.run_id,
         checkpoint.node_name,
         checkpoint.status,
         _json_dumps(checkpoint.state),
@@ -935,6 +968,8 @@ def _task_from_row(row: sqlite3.Row) -> DiagnosisTaskRecord:
         task_id=row["task_id"],
         alert_group_id=row["alert_group_id"],
         rerun_of_task_id=row["rerun_of_task_id"],
+        thread_id=row["thread_id"],
+        run_id=row["run_id"],
         source=row["source"],
         status=DiagnosisTaskStatus(row["status"]),
         question=row["question"],
@@ -991,6 +1026,8 @@ def _checkpoint_from_row(row: sqlite3.Row) -> OpsGraphCheckpointRecord:
     return OpsGraphCheckpointRecord(
         checkpoint_id=row["checkpoint_id"],
         task_id=row["task_id"],
+        thread_id=row["thread_id"],
+        run_id=row["run_id"],
         node_name=row["node_name"],
         status=row["status"],
         state=_json_loads(row["state_json"], {}),
