@@ -36,3 +36,4 @@ Docs:
 - Async tasks: `docs/async-tasks.md`
 - Alert deduplication: `docs/alert-dedup.md`
 - Project acceptance: `docs/project-acceptance.md`
+- LangGraph reliability: `docs/langgraph-reliability.md`

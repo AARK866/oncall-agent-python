@@ -13,6 +13,7 @@ from app.schemas import (
     DiagnosisTaskEventType,
     DiagnosisTaskRecord,
     DiagnosisTaskStatus,
+    OpsGraphCheckpointRecord,
 )
 from app.storage import SQLiteIncidentStore, SQLiteTaskStore
 
@@ -127,6 +128,9 @@ class DiagnosisTaskQueue:
 
     async def run(self, task_id: str) -> None:
         task = self.task_store.mark_running(task_id)
+        trigger_metadata = dict(task.trigger_metadata)
+        trigger_metadata["task_id"] = task.task_id
+        trigger_metadata["task_source"] = task.source
         try:
             response = await OpsAgent.create_default(incident_store=self.incident_store).analyze(
                 question=task.question,
@@ -134,7 +138,7 @@ class DiagnosisTaskQueue:
                 service=task.service,
                 severity=task.severity,
                 labels=task.labels,
-                trigger_metadata=task.trigger_metadata,
+                trigger_metadata=trigger_metadata,
             )
         except Exception as exc:
             self.task_store.mark_failed(task_id, str(exc))
@@ -153,6 +157,9 @@ class DiagnosisTaskQueue:
 
     def events(self, task_id: str) -> list[DiagnosisTaskEventRecord]:
         return self.task_store.list_events(task_id)
+
+    def checkpoints(self, task_id: str) -> list[OpsGraphCheckpointRecord]:
+        return self.task_store.list_graph_checkpoints(task_id)
 
     def get_alert_group(self, group_id: str) -> AlertGroupRecord | None:
         return self.task_store.get_alert_group(group_id)

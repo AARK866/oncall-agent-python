@@ -15,6 +15,7 @@ from app.schemas import (
     DiagnosisTaskEventType,
     DiagnosisTaskRecord,
     DiagnosisTaskStatus,
+    OpsGraphCheckpointRecord,
 )
 
 
@@ -316,6 +317,35 @@ class SQLiteTaskStore:
             )
         return event
 
+    def save_graph_checkpoint(
+        self,
+        task_id: str,
+        node_name: str,
+        status: str,
+        state: dict[str, Any],
+        error: str | None = None,
+    ) -> OpsGraphCheckpointRecord:
+        checkpoint = OpsGraphCheckpointRecord(
+            checkpoint_id=f"chk_{uuid4().hex}",
+            task_id=task_id,
+            node_name=node_name,
+            status=status,
+            state=state,
+            error=error[:4000] if error else None,
+            created_at=datetime.utcnow(),
+        )
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO ops_graph_checkpoints (
+                    checkpoint_id, task_id, node_name, status, state_json, error, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                _checkpoint_values(checkpoint),
+            )
+        return checkpoint
+
     def get_task(self, task_id: str) -> DiagnosisTaskRecord | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -388,6 +418,18 @@ class SQLiteTaskStore:
             ).fetchall()
         return [_event_from_row(row) for row in rows]
 
+    def list_graph_checkpoints(self, task_id: str) -> list[OpsGraphCheckpointRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM ops_graph_checkpoints
+                WHERE task_id = ?
+                ORDER BY created_at ASC
+                """,
+                (task_id,),
+            ).fetchall()
+        return [_checkpoint_from_row(row) for row in rows]
+
     def _init_schema(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -449,6 +491,26 @@ class SQLiteTaskStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (task_id) REFERENCES diagnosis_tasks (task_id)
                 )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ops_graph_checkpoints (
+                    checkpoint_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    node_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    state_json TEXT NOT NULL,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (task_id) REFERENCES diagnosis_tasks (task_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_ops_graph_checkpoints_task_created
+                ON ops_graph_checkpoints (task_id, created_at)
                 """
             )
 
@@ -514,6 +576,18 @@ def _event_values(event: DiagnosisTaskEventRecord) -> tuple[Any, ...]:
     )
 
 
+def _checkpoint_values(checkpoint: OpsGraphCheckpointRecord) -> tuple[Any, ...]:
+    return (
+        checkpoint.checkpoint_id,
+        checkpoint.task_id,
+        checkpoint.node_name,
+        checkpoint.status,
+        _json_dumps(checkpoint.state),
+        checkpoint.error,
+        _datetime_to_text(checkpoint.created_at),
+    )
+
+
 def _task_from_row(row: sqlite3.Row) -> DiagnosisTaskRecord:
     result_data = _json_loads(row["result_json"], None)
     return DiagnosisTaskRecord(
@@ -567,6 +641,18 @@ def _event_from_row(row: sqlite3.Row) -> DiagnosisTaskEventRecord:
         event_type=DiagnosisTaskEventType(row["event_type"]),
         message=row["message"],
         data=_json_loads(row["data_json"], {}),
+        created_at=_datetime_from_text(row["created_at"]),
+    )
+
+
+def _checkpoint_from_row(row: sqlite3.Row) -> OpsGraphCheckpointRecord:
+    return OpsGraphCheckpointRecord(
+        checkpoint_id=row["checkpoint_id"],
+        task_id=row["task_id"],
+        node_name=row["node_name"],
+        status=row["status"],
+        state=_json_loads(row["state_json"], {}),
+        error=row["error"],
         created_at=_datetime_from_text(row["created_at"]),
     )
 

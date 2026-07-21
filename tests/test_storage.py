@@ -91,6 +91,36 @@ def test_sqlite_task_store_records_task_events(tmp_path) -> None:
     ]
 
 
+def test_sqlite_task_store_records_graph_checkpoints(tmp_path) -> None:
+    store = SQLiteTaskStore(tmp_path / "tasks.db")
+    task = store.create_task(
+        source="alertmanager",
+        question="payment service 5xx is high",
+        session_id="checkpoint-storage-test",
+        service="payment-api",
+        severity=AlertSeverity.critical,
+    )
+
+    store.save_graph_checkpoint(
+        task_id=task.task_id,
+        node_name="infer_service",
+        status="started",
+        state={"session_id": "checkpoint-storage-test"},
+    )
+    store.save_graph_checkpoint(
+        task_id=task.task_id,
+        node_name="infer_service",
+        status="completed",
+        state={"service": "payment-api"},
+    )
+
+    checkpoints = store.list_graph_checkpoints(task.task_id)
+
+    assert [checkpoint.status for checkpoint in checkpoints] == ["started", "completed"]
+    assert checkpoints[0].node_name == "infer_service"
+    assert checkpoints[1].state["service"] == "payment-api"
+
+
 def test_sqlite_task_store_aggregates_alert_groups_by_dedupe_key(tmp_path) -> None:
     store = SQLiteTaskStore(tmp_path / "tasks.db")
 

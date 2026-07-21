@@ -45,6 +45,9 @@ class AlertGroupStatus(str, Enum):
 class DiagnosisTaskEventType(str, Enum):
     queued = "queued"
     running = "running"
+    graph_node_started = "graph_node_started"
+    graph_node_completed = "graph_node_completed"
+    graph_node_failed = "graph_node_failed"
     tool_result = "tool_result"
     retrieved_docs = "retrieved_docs"
     incident_persisted = "incident_persisted"
@@ -198,6 +201,16 @@ class DiagnosisTaskEventRecord(BaseModel):
     event_type: DiagnosisTaskEventType
     message: str
     data: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class OpsGraphCheckpointRecord(BaseModel):
+    checkpoint_id: str
+    task_id: str
+    node_name: str
+    status: str
+    state: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

@@ -12,11 +12,13 @@ from app.schemas import (
     ChatMode,
     ChatResponse,
     DiagnosisReport,
+    DiagnosisTaskEventType,
     PlanTrace,
     ReactStep,
     ToolCall,
     ToolResult,
 )
+from app.storage import SQLiteTaskStore
 from app.tools import ToolRegistry
 
 
@@ -62,6 +64,7 @@ class OpsGraphWorkflow:
             None,
         ],
         graph_runtime: str = "local",
+        checkpoint_store: SQLiteTaskStore | None = None,
     ) -> None:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
@@ -73,6 +76,7 @@ class OpsGraphWorkflow:
         self.format_report = format_report
         self.persist_analysis = persist_analysis
         self.graph_runtime = graph_runtime
+        self.checkpoint_store = checkpoint_store or SQLiteTaskStore.from_settings()
 
     async def run(
         self,
@@ -116,8 +120,8 @@ class OpsGraphWorkflow:
     ) -> None:
         state.graph_runtime = "local"
         state.graph_runtime_reason = reason
-        for _, node in nodes:
-            await node(state)
+        for name, node in nodes:
+            await self._run_node(state, name, node)
 
     async def _run_with_langgraph(
         self,
@@ -150,7 +154,7 @@ class OpsGraphWorkflow:
 
         graph = StateGraph(dict)
         for name, node in nodes:
-            graph.add_node(name, self._langgraph_node(node))
+            graph.add_node(name, self._langgraph_node(name, node))
 
         graph.set_entry_point(nodes[0][0])
         for index in range(len(nodes) - 1):
@@ -169,17 +173,116 @@ class OpsGraphWorkflow:
 
     def _langgraph_node(
         self,
+        name: str,
         node: Callable[[OpsGraphState], Any],
     ) -> Callable[[dict[str, Any]], Any]:
         async def wrapped(raw_state: dict[str, Any]) -> dict[str, Any]:
             ops_state = raw_state["ops_state"]
-            await node(ops_state)
+            await self._run_node(ops_state, name, node)
             return {"ops_state": ops_state}
 
         return wrapped
 
     def _is_langgraph_available(self) -> bool:
         return find_spec("langgraph") is not None
+
+    async def _run_node(
+        self,
+        state: OpsGraphState,
+        name: str,
+        node: Callable[[OpsGraphState], Any],
+    ) -> None:
+        self._save_checkpoint(state, name, "started")
+        try:
+            await node(state)
+        except Exception as exc:
+            self._save_checkpoint(state, name, "failed", error=str(exc))
+            raise
+        self._save_checkpoint(state, name, "completed")
+
+    def _save_checkpoint(
+        self,
+        state: OpsGraphState,
+        node_name: str,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        task_id = self._task_id(state)
+        if not task_id:
+            return
+
+        self.checkpoint_store.save_graph_checkpoint(
+            task_id=task_id,
+            node_name=node_name,
+            status=status,
+            state=self._state_snapshot(state),
+            error=error,
+        )
+        self._append_graph_event(task_id, node_name, status, error)
+
+    def _append_graph_event(
+        self,
+        task_id: str,
+        node_name: str,
+        status: str,
+        error: str | None,
+    ) -> None:
+        event_map = {
+            "started": DiagnosisTaskEventType.graph_node_started,
+            "completed": DiagnosisTaskEventType.graph_node_completed,
+            "failed": DiagnosisTaskEventType.graph_node_failed,
+        }
+        event_type = event_map.get(status)
+        if event_type is None:
+            return
+
+        self.checkpoint_store.append_event(
+            task_id=task_id,
+            event_type=event_type,
+            message=f"Ops graph node {node_name} {status}.",
+            data={
+                "node_name": node_name,
+                "status": status,
+                "error": error,
+            },
+        )
+
+    def _task_id(self, state: OpsGraphState) -> str | None:
+        raw_task_id = state.trigger_metadata.get("task_id")
+        return str(raw_task_id) if raw_task_id else None
+
+    def _state_snapshot(self, state: OpsGraphState) -> dict[str, Any]:
+        return {
+            "question": state.question,
+            "session_id": state.session_id,
+            "requested_service": state.requested_service,
+            "service": state.service,
+            "alert_severity": state.alert_severity.value if state.alert_severity else None,
+            "alert_labels": state.alert_labels,
+            "trigger_metadata": state.trigger_metadata,
+            "selected_tool_calls": [_dump_model(call) for call in state.selected_tool_calls],
+            "tool_selection_metadata": state.tool_selection_metadata,
+            "tool_results": [_dump_model(result) for result in state.tool_results],
+            "source_doc_ids": [
+                source.doc_id
+                for source in state.knowledge_response.sources
+            ]
+            if state.knowledge_response
+            else [],
+            "runbook_retrieved_count": (
+                state.knowledge_response.metadata.get("retrieved_count", 0)
+                if state.knowledge_response
+                else 0
+            ),
+            "has_plan_trace": state.plan_trace is not None,
+            "has_fallback_report": state.fallback_report is not None,
+            "has_report": state.report is not None,
+            "has_response": state.response is not None,
+            "summary_metadata": state.summary_metadata,
+            "graph_runtime": state.graph_runtime,
+            "graph_runtime_reason": state.graph_runtime_reason,
+            "graph_trace": state.graph_trace,
+        }
 
     def _nodes(self) -> list[tuple[str, Callable[[OpsGraphState], Any]]]:
         return [
@@ -304,3 +407,10 @@ class OpsGraphWorkflow:
         if state.report is None:
             raise RuntimeError("Ops graph state has no final report yet.")
         return state.report
+
+
+def _dump_model(value: Any) -> Any:
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
+    return value
