@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -298,6 +298,42 @@ class SQLiteTaskStore:
             data={
                 "requested_by": requested_by,
                 "reason": reason,
+            },
+        )
+        return self.require_task(task_id)
+
+    def mark_timed_out(
+        self,
+        task_id: str,
+        requested_by: str = "system",
+        reason: str | None = None,
+        max_age_seconds: int | None = None,
+    ) -> DiagnosisTaskRecord:
+        now = datetime.utcnow()
+        error = reason or "Diagnosis task exceeded its execution timeout."
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE diagnosis_tasks
+                SET status = ?, error = ?, updated_at = ?, finished_at = ?
+                WHERE task_id = ?
+                """,
+                (
+                    DiagnosisTaskStatus.timed_out.value,
+                    error[:4000],
+                    _datetime_to_text(now),
+                    _datetime_to_text(now),
+                    task_id,
+                ),
+            )
+        self.append_event(
+            task_id=task_id,
+            event_type=DiagnosisTaskEventType.timed_out,
+            message="Diagnosis task timed out.",
+            data={
+                "requested_by": requested_by,
+                "reason": reason,
+                "max_age_seconds": max_age_seconds,
             },
         )
         return self.require_task(task_id)
@@ -614,6 +650,30 @@ class SQLiteTaskStore:
             ).fetchall()
         return [_task_from_row(row) for row in rows]
 
+    def list_stale_active_tasks(
+        self,
+        max_age_seconds: int,
+        limit: int = 50,
+    ) -> list[DiagnosisTaskRecord]:
+        cutoff = datetime.utcnow() - timedelta(seconds=max_age_seconds)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM diagnosis_tasks
+                WHERE status IN (?, ?)
+                  AND COALESCE(started_at, updated_at, created_at) <= ?
+                ORDER BY COALESCE(started_at, updated_at, created_at) ASC
+                LIMIT ?
+                """,
+                (
+                    DiagnosisTaskStatus.running.value,
+                    DiagnosisTaskStatus.cancel_requested.value,
+                    _datetime_to_text(cutoff),
+                    limit,
+                ),
+            ).fetchall()
+        return [_task_from_row(row) for row in rows]
+
     def list_alert_groups(self, limit: int = 20) -> list[AlertGroupRecord]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -683,6 +743,12 @@ class SQLiteTaskStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_diagnosis_tasks_rerun_of
                 ON diagnosis_tasks (rerun_of_task_id, created_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_diagnosis_tasks_status_updated
+                ON diagnosis_tasks (status, updated_at)
                 """
             )
             connection.execute(

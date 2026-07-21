@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     tool_retry_max_attempts: int = 3
     tool_retry_base_delay_seconds: float = 0.05
     tool_retry_max_delay_seconds: float = 1.0
+    diagnosis_task_timeout_seconds: int = 900
+    diagnosis_task_recovery_limit: int = 50
     ops_graph_runtime: str = "local"
     knowledge_retriever_mode: str = "keyword"
 

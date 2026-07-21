@@ -42,3 +42,4 @@ Docs:
 - Retry policy: `docs/retry-policy.md`
 - Task rerun: `docs/task-rerun.md`
 - Task cancellation: `docs/task-cancellation.md`
+- Task timeout recovery: `docs/task-timeout-recovery.md`

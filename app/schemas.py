@@ -35,6 +35,7 @@ class DiagnosisTaskStatus(str, Enum):
     running = "running"
     cancel_requested = "cancel_requested"
     canceled = "canceled"
+    timed_out = "timed_out"
     succeeded = "succeeded"
     failed = "failed"
 
@@ -50,6 +51,7 @@ class DiagnosisTaskEventType(str, Enum):
     rerun_requested = "rerun_requested"
     cancel_requested = "cancel_requested"
     canceled = "canceled"
+    timed_out = "timed_out"
     graph_node_started = "graph_node_started"
     graph_node_completed = "graph_node_completed"
     graph_node_canceled = "graph_node_canceled"
@@ -258,6 +260,19 @@ class DiagnosisTaskRerunRequest(BaseModel):
 class DiagnosisTaskCancelRequest(BaseModel):
     requested_by: str = Field(default="manual", min_length=1, max_length=120)
     reason: str | None = Field(default=None, max_length=1000)
+
+
+class StaleTaskRecoveryRequest(BaseModel):
+    requested_by: str = Field(default="system", min_length=1, max_length=120)
+    reason: str | None = Field(default=None, max_length=1000)
+    max_age_seconds: int | None = Field(default=None, ge=1, le=86400)
+    limit: int | None = Field(default=None, ge=1, le=500)
+
+
+class StaleTaskRecoveryResponse(BaseModel):
+    recovered: int
+    tasks: list[DiagnosisTaskRecord] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AlertTriggerResponse(BaseModel):

@@ -49,7 +49,7 @@ queued -> cancel_requested -> canceled
 - `running` tasks become `cancel_requested`.
 - the graph runner checks cancellation before each node and stops at the next
   safe boundary.
-- `succeeded`, `failed`, and `canceled` tasks are terminal.
+- `succeeded`, `failed`, `timed_out`, and `canceled` tasks are terminal.
 
 ## Harness Connection
 

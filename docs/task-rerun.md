@@ -64,6 +64,7 @@ By default, only terminal tasks can be rerun:
 - `succeeded`
 - `failed`
 - `canceled`
+- `timed_out`
 
 If a task is still `queued` or `running`, the API returns `409 Conflict`. An
 operator can pass `force=true` when they intentionally want to duplicate an

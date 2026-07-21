@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agents import GraphExecutionCancelled, OpsAgent
+from app.config import settings
 from app.schemas import (
     AlertGroupRecord,
     AlertGroupStatus,
@@ -97,7 +98,12 @@ class DiagnosisTaskQueue:
                 if existing_group.latest_task_id
                 else None
             )
-            if latest_task and latest_task.status != DiagnosisTaskStatus.failed:
+            if latest_task and latest_task.status in {
+                DiagnosisTaskStatus.queued,
+                DiagnosisTaskStatus.running,
+                DiagnosisTaskStatus.cancel_requested,
+                DiagnosisTaskStatus.succeeded,
+            }:
                 return DiagnosisTaskSubmission(
                     task=latest_task,
                     alert_group=group,
@@ -206,7 +212,11 @@ class DiagnosisTaskQueue:
             return task
         if task.status == DiagnosisTaskStatus.cancel_requested:
             return task
-        if task.status in {DiagnosisTaskStatus.succeeded, DiagnosisTaskStatus.failed}:
+        if task.status in {
+            DiagnosisTaskStatus.succeeded,
+            DiagnosisTaskStatus.failed,
+            DiagnosisTaskStatus.timed_out,
+        }:
             raise ValueError("Only queued or running tasks can be canceled.")
 
         if task.status == DiagnosisTaskStatus.queued:
@@ -226,6 +236,43 @@ class DiagnosisTaskQueue:
             requested_by=requested_by,
             reason=reason,
         )
+
+    def recover_stale_tasks(
+        self,
+        requested_by: str = "system",
+        reason: str | None = None,
+        max_age_seconds: int | None = None,
+        limit: int | None = None,
+    ) -> list[DiagnosisTaskRecord]:
+        effective_max_age_seconds = max_age_seconds or settings.diagnosis_task_timeout_seconds
+        effective_limit = limit or settings.diagnosis_task_recovery_limit
+        stale_tasks = self.task_store.list_stale_active_tasks(
+            max_age_seconds=effective_max_age_seconds,
+            limit=effective_limit,
+        )
+
+        recovered: list[DiagnosisTaskRecord] = []
+        for task in stale_tasks:
+            if task.status == DiagnosisTaskStatus.cancel_requested:
+                recovered.append(
+                    self.task_store.mark_canceled(
+                        task_id=task.task_id,
+                        requested_by=requested_by,
+                        reason=reason or "Cancellation request timed out before worker acknowledgement.",
+                    )
+                )
+                continue
+
+            recovered.append(
+                self.task_store.mark_timed_out(
+                    task_id=task.task_id,
+                    requested_by=requested_by,
+                    reason=reason,
+                    max_age_seconds=effective_max_age_seconds,
+                )
+            )
+
+        return recovered
 
     def resolve_alert(self, dedupe_key: str) -> AlertGroupRecord | None:
         return self.task_store.resolve_alert_group(dedupe_key)

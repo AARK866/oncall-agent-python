@@ -1,5 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
+from app.config import settings
 from app.schemas import (
     DiagnosisTaskCancelRequest,
     DiagnosisTaskEventRecord,
@@ -7,6 +8,8 @@ from app.schemas import (
     DiagnosisTaskRerunRequest,
     HumanReviewRequestRecord,
     OpsGraphCheckpointRecord,
+    StaleTaskRecoveryRequest,
+    StaleTaskRecoveryResponse,
 )
 from app.security import require_api_token
 from app.tasks import DiagnosisTaskQueue
@@ -21,6 +24,31 @@ router = APIRouter(
 @router.get("", response_model=list[DiagnosisTaskRecord])
 async def list_tasks(limit: int = Query(default=20, ge=1, le=100)) -> list[DiagnosisTaskRecord]:
     return _queue().list(limit=limit)
+
+
+@router.post(
+    "/recover-stale",
+    response_model=StaleTaskRecoveryResponse,
+)
+async def recover_stale_tasks(request: StaleTaskRecoveryRequest) -> StaleTaskRecoveryResponse:
+    max_age_seconds = request.max_age_seconds or settings.diagnosis_task_timeout_seconds
+    limit = request.limit or settings.diagnosis_task_recovery_limit
+    tasks = _queue().recover_stale_tasks(
+        requested_by=request.requested_by,
+        reason=request.reason,
+        max_age_seconds=max_age_seconds,
+        limit=limit,
+    )
+    return StaleTaskRecoveryResponse(
+        recovered=len(tasks),
+        tasks=tasks,
+        metadata={
+            "requested_by": request.requested_by,
+            "reason": request.reason,
+            "max_age_seconds": max_age_seconds,
+            "limit": limit,
+        },
+    )
 
 
 @router.post(
