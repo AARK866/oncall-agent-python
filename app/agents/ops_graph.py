@@ -30,6 +30,16 @@ class GraphExecutionCancelled(Exception):
     """Raised when a diagnosis graph should stop before the next node."""
 
 
+class GraphExecutionPaused(Exception):
+    """Raised when a diagnosis graph needs an external decision before continuing."""
+
+    def __init__(self, review_ids: list[str], response: ChatResponse | None = None) -> None:
+        self.review_ids = review_ids
+        self.response = response
+        joined_review_ids = ", ".join(review_ids) if review_ids else "unknown"
+        super().__init__(f"Ops graph paused for human review: {joined_review_ids}.")
+
+
 @dataclass
 class OpsGraphState:
     question: str
@@ -229,6 +239,8 @@ class OpsGraphWorkflow:
 
         try:
             await self._invoke_langgraph(state, nodes)
+        except (GraphExecutionCancelled, GraphExecutionPaused):
+            raise
         except Exception:
             if strict:
                 raise
@@ -297,6 +309,10 @@ class OpsGraphWorkflow:
         self._save_checkpoint(state, name, "started")
         try:
             await node(state)
+        except GraphExecutionPaused as exc:
+            self._refresh_response_identity(state)
+            self._save_checkpoint(state, name, "paused", error=str(exc))
+            raise
         except Exception as exc:
             self._save_checkpoint(state, name, "failed", error=str(exc))
             raise
@@ -343,6 +359,7 @@ class OpsGraphWorkflow:
         event_map = {
             "started": DiagnosisTaskEventType.graph_node_started,
             "completed": DiagnosisTaskEventType.graph_node_completed,
+            "paused": DiagnosisTaskEventType.graph_node_paused,
             "canceled": DiagnosisTaskEventType.graph_node_canceled,
             "failed": DiagnosisTaskEventType.graph_node_failed,
         }
@@ -643,6 +660,7 @@ class OpsGraphWorkflow:
                 "risk_reasons": review.risk_reasons,
             },
         )
+        raise GraphExecutionPaused(review_ids=[review.review_id], response=state.response)
 
     async def _persist_incident_node(self, state: OpsGraphState) -> None:
         if state.response is None:

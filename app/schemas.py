@@ -33,6 +33,7 @@ class IncidentStatus(str, Enum):
 class DiagnosisTaskStatus(str, Enum):
     queued = "queued"
     running = "running"
+    waiting_review = "waiting_review"
     cancel_requested = "cancel_requested"
     canceled = "canceled"
     timed_out = "timed_out"
@@ -48,6 +49,7 @@ class AlertGroupStatus(str, Enum):
 class DiagnosisTaskEventType(str, Enum):
     queued = "queued"
     running = "running"
+    waiting_review = "waiting_review"
     rerun_requested = "rerun_requested"
     resume_requested = "resume_requested"
     cancel_requested = "cancel_requested"
@@ -55,6 +57,7 @@ class DiagnosisTaskEventType(str, Enum):
     timed_out = "timed_out"
     graph_node_started = "graph_node_started"
     graph_node_completed = "graph_node_completed"
+    graph_node_paused = "graph_node_paused"
     graph_node_canceled = "graph_node_canceled"
     graph_node_failed = "graph_node_failed"
     human_review_requested = "human_review_requested"

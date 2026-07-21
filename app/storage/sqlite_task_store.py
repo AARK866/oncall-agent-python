@@ -344,6 +344,42 @@ class SQLiteTaskStore:
         )
         return self.require_task(task_id)
 
+    def mark_waiting_review(
+        self,
+        task_id: str,
+        response: ChatResponse,
+        review_ids: list[str] | None = None,
+        reason: str | None = None,
+    ) -> DiagnosisTaskRecord:
+        now = datetime.utcnow()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE diagnosis_tasks
+                SET status = ?, result_json = ?, incident_id = ?, diagnosis_id = ?,
+                    error = NULL, updated_at = ?, finished_at = NULL
+                WHERE task_id = ?
+                """,
+                (
+                    DiagnosisTaskStatus.waiting_review.value,
+                    _json_dumps(response.model_dump(mode="json")),
+                    response.metadata.get("incident_id"),
+                    response.metadata.get("diagnosis_id"),
+                    _datetime_to_text(now),
+                    task_id,
+                ),
+            )
+        self.append_event(
+            task_id=task_id,
+            event_type=DiagnosisTaskEventType.waiting_review,
+            message="Diagnosis task is waiting for human review.",
+            data={
+                "review_ids": review_ids or [],
+                "reason": reason,
+            },
+        )
+        return self.require_task(task_id)
+
     def mark_succeeded(self, task_id: str, response: ChatResponse) -> DiagnosisTaskRecord:
         now = datetime.utcnow()
         with self._connect() as connection:
@@ -375,23 +411,48 @@ class SQLiteTaskStore:
         )
         return self.require_task(task_id)
 
-    def mark_failed(self, task_id: str, error: str) -> DiagnosisTaskRecord:
+    def mark_failed(
+        self,
+        task_id: str,
+        error: str,
+        response: ChatResponse | None = None,
+    ) -> DiagnosisTaskRecord:
         now = datetime.utcnow()
         with self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE diagnosis_tasks
-                SET status = ?, error = ?, updated_at = ?, finished_at = ?
-                WHERE task_id = ?
-                """,
-                (
-                    DiagnosisTaskStatus.failed.value,
-                    error[:4000],
-                    _datetime_to_text(now),
-                    _datetime_to_text(now),
-                    task_id,
-                ),
-            )
+            if response is None:
+                connection.execute(
+                    """
+                    UPDATE diagnosis_tasks
+                    SET status = ?, error = ?, updated_at = ?, finished_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (
+                        DiagnosisTaskStatus.failed.value,
+                        error[:4000],
+                        _datetime_to_text(now),
+                        _datetime_to_text(now),
+                        task_id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE diagnosis_tasks
+                    SET status = ?, result_json = ?, incident_id = ?, diagnosis_id = ?,
+                        error = ?, updated_at = ?, finished_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (
+                        DiagnosisTaskStatus.failed.value,
+                        _json_dumps(response.model_dump(mode="json")),
+                        response.metadata.get("incident_id"),
+                        response.metadata.get("diagnosis_id"),
+                        error[:4000],
+                        _datetime_to_text(now),
+                        _datetime_to_text(now),
+                        task_id,
+                    ),
+                )
         self.append_event(
             task_id=task_id,
             event_type=DiagnosisTaskEventType.failed,

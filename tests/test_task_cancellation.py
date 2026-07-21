@@ -85,7 +85,8 @@ def test_succeeded_task_cannot_be_canceled() -> None:
     )
     assert response.status_code == 202
     task_id = response.json()["tasks"][0]["task_id"]
-    assert _get_task(task_id)["status"] == "succeeded"
+    assert _get_task(task_id)["status"] == "waiting_review"
+    assert _approve_pending_reviews(task_id)["status"] == "succeeded"
 
     cancel_response = client.post(
         f"/api/tasks/{task_id}/cancel",
@@ -114,3 +115,21 @@ def _get_task_event_types(task_id: str) -> list[str]:
     response = client.get(f"/api/tasks/{task_id}/events")
     assert response.status_code == 200
     return [event["event_type"] for event in response.json()]
+
+
+def _approve_pending_reviews(task_id: str) -> dict:
+    reviews_response = client.get(f"/api/tasks/{task_id}/reviews")
+    assert reviews_response.status_code == 200
+    reviews = reviews_response.json()
+    assert reviews
+
+    for review in reviews:
+        if review["status"] != "pending":
+            continue
+        approve_response = client.post(
+            f"/api/reviews/{review['review_id']}/approve",
+            json={"reviewer": "test", "reason": "Approved in test."},
+        )
+        assert approve_response.status_code == 200
+
+    return _get_task(task_id)

@@ -30,6 +30,9 @@ def test_alert_task_records_ops_graph_checkpoints() -> None:
     assert response.status_code == 202
     task_id = response.json()["tasks"][0]["task_id"]
     task = client.get(f"/api/tasks/{task_id}").json()
+    assert task["status"] == "waiting_review"
+
+    task = _approve_pending_reviews(task_id)
 
     checkpoints_response = client.get(f"/api/tasks/{task_id}/checkpoints")
     assert checkpoints_response.status_code == 200
@@ -49,9 +52,14 @@ def test_alert_task_records_ops_graph_checkpoints() -> None:
         "build_fallback_report",
         "summarize_report",
         "build_response",
-        "human_review_gate",
         "persist_incident",
     ]
+    paused_nodes = [
+        checkpoint["node_name"]
+        for checkpoint in checkpoints
+        if checkpoint["status"] == "paused"
+    ]
+    assert paused_nodes == ["human_review_gate"]
     assert task["thread_id"].startswith("thread_ag_")
     assert task["run_id"].startswith("run_")
     assert all(checkpoint["thread_id"] == task["thread_id"] for checkpoint in checkpoints)
@@ -137,8 +145,28 @@ def test_ops_graph_uses_langgraph_memory_checkpointer(monkeypatch: pytest.Monkey
 
     assert response.status_code == 202
     task_id = response.json()["tasks"][0]["task_id"]
-    task = client.get(f"/api/tasks/{task_id}").json()
+    task = _approve_pending_reviews(task_id)
 
     assert task["status"] == "succeeded"
     assert task["result"]["metadata"]["graph_runtime"]["used"] == "langgraph"
     assert task["result"]["metadata"]["graph_runtime"]["checkpointer_used"] == "memory"
+
+
+def _approve_pending_reviews(task_id: str) -> dict:
+    reviews_response = client.get(f"/api/tasks/{task_id}/reviews")
+    assert reviews_response.status_code == 200
+    reviews = reviews_response.json()
+    assert reviews
+
+    for review in reviews:
+        if review["status"] != "pending":
+            continue
+        approve_response = client.post(
+            f"/api/reviews/{review['review_id']}/approve",
+            json={"reviewer": "test", "reason": "Approved in test."},
+        )
+        assert approve_response.status_code == 200
+
+    response = client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    return response.json()

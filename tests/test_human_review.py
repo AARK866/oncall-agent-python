@@ -24,6 +24,7 @@ def test_alert_diagnosis_creates_pending_human_review_for_rollback() -> None:
     assert response.status_code == 202
     task_id = response.json()["tasks"][0]["task_id"]
     task = client.get(f"/api/tasks/{task_id}").json()
+    assert task["status"] == "waiting_review"
     human_review = task["result"]["metadata"]["human_review"]
 
     assert human_review["required"] is True
@@ -63,6 +64,11 @@ def test_human_review_can_be_approved() -> None:
     assert approved["reviewer"] == "alice"
     assert approved["decided_at"] is not None
 
+    task = client.get(f"/api/tasks/{task_id}").json()
+    assert task["status"] == "succeeded"
+    assert task["result"]["metadata"]["human_review"]["status"] == "approved"
+    assert task["incident_id"].startswith("inc_")
+
 
 def test_human_review_can_be_rejected() -> None:
     response = client.post(
@@ -87,6 +93,11 @@ def test_human_review_can_be_rejected() -> None:
     rejected = reject_response.json()
     assert rejected["status"] == "rejected"
     assert rejected["reviewer"] == "bob"
+
+    task = client.get(f"/api/tasks/{task_id}").json()
+    assert task["status"] == "failed"
+    assert task["result"]["metadata"]["human_review"]["status"] == "rejected"
+    assert "database owner" in task["error"]
 
 
 def test_missing_human_review_returns_404() -> None:

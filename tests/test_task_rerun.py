@@ -24,7 +24,7 @@ def test_succeeded_task_can_be_rerun_from_api() -> None:
     )
     assert response.status_code == 202
     original_task_id = response.json()["tasks"][0]["task_id"]
-    original_task = _get_task(original_task_id)
+    original_task = _approve_pending_reviews(original_task_id)
     assert original_task["status"] == "succeeded"
 
     rerun_response = client.post(
@@ -46,7 +46,10 @@ def test_succeeded_task_can_be_rerun_from_api() -> None:
     assert new_task["trigger_metadata"]["rerun"]["requested_by"] == "alice"
     assert new_task["trigger_metadata"]["rerun"]["root_task_id"] == original_task_id
 
-    completed_rerun = _get_task(new_task["task_id"])
+    waiting_rerun = _get_task(new_task["task_id"])
+    assert waiting_rerun["status"] == "waiting_review"
+
+    completed_rerun = _approve_pending_reviews(new_task["task_id"])
     assert completed_rerun["status"] == "succeeded"
     assert completed_rerun["rerun_of_task_id"] == original_task_id
     assert completed_rerun["result"]["metadata"]["trigger"]["rerun"]["reason"] == (
@@ -100,3 +103,21 @@ def _get_task_events(task_id: str) -> list[dict]:
     response = client.get(f"/api/tasks/{task_id}/events")
     assert response.status_code == 200
     return response.json()
+
+
+def _approve_pending_reviews(task_id: str) -> dict:
+    reviews_response = client.get(f"/api/tasks/{task_id}/reviews")
+    assert reviews_response.status_code == 200
+    reviews = reviews_response.json()
+    assert reviews
+
+    for review in reviews:
+        if review["status"] != "pending":
+            continue
+        approve_response = client.post(
+            f"/api/reviews/{review['review_id']}/approve",
+            json={"reviewer": "test", "reason": "Approved in test."},
+        )
+        assert approve_response.status_code == 200
+
+    return _get_task(task_id)

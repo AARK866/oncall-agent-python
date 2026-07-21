@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.schemas import (
     HumanReviewDecisionRequest,
@@ -7,6 +7,7 @@ from app.schemas import (
 )
 from app.security import require_api_token
 from app.storage import SQLiteTaskStore
+from app.tasks import DiagnosisTaskQueue
 
 router = APIRouter(
     prefix="/api/reviews",
@@ -35,8 +36,11 @@ async def get_human_review(review_id: str) -> HumanReviewRequestRecord:
 async def approve_human_review(
     review_id: str,
     request: HumanReviewDecisionRequest,
+    background_tasks: BackgroundTasks,
 ) -> HumanReviewRequestRecord:
-    return _decide(review_id, HumanReviewStatus.approved, request)
+    review = _decide(review_id, HumanReviewStatus.approved, request)
+    background_tasks.add_task(DiagnosisTaskQueue().run, review.task_id)
+    return review
 
 
 @router.post("/{review_id}/reject", response_model=HumanReviewRequestRecord)
@@ -44,7 +48,12 @@ async def reject_human_review(
     review_id: str,
     request: HumanReviewDecisionRequest,
 ) -> HumanReviewRequestRecord:
-    return _decide(review_id, HumanReviewStatus.rejected, request)
+    review = _decide(review_id, HumanReviewStatus.rejected, request)
+    DiagnosisTaskQueue().reject_after_review(
+        review=review,
+        reason=request.reason,
+    )
+    return review
 
 
 def _decide(

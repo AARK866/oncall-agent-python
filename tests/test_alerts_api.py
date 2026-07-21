@@ -33,6 +33,9 @@ def test_alert_analyze_endpoint_triggers_ops_diagnosis() -> None:
     assert task["status"] == "queued"
 
     task_detail = _get_task(task["task_id"])
+    assert task_detail["status"] == "waiting_review"
+
+    task_detail = _approve_pending_reviews(task["task_id"])
     assert task_detail["status"] == "succeeded"
     assert task_detail["source"] == "api_alert"
     assert task_detail["service"] == "payment-api"
@@ -46,6 +49,8 @@ def test_alert_analyze_endpoint_triggers_ops_diagnosis() -> None:
     event_types = _get_task_event_types(task["task_id"])
     assert event_types[0] == "queued"
     assert "running" in event_types
+    assert "waiting_review" in event_types
+    assert "human_review_approved" in event_types
     assert "tool_result" in event_types
     assert "retrieved_docs" in event_types
     assert "incident_persisted" in event_types
@@ -53,6 +58,7 @@ def test_alert_analyze_endpoint_triggers_ops_diagnosis() -> None:
 
 
 def test_alertmanager_webhook_processes_only_firing_alerts() -> None:
+    fingerprint = f"payment-5xx-fingerprint-{uuid4().hex}"
     response = client.post(
         "/api/alerts/alertmanager",
         json={
@@ -70,7 +76,7 @@ def test_alertmanager_webhook_processes_only_firing_alerts() -> None:
                     "annotations": {"description": "5xx rate is above 5%"},
                     "startsAt": "2026-07-06T10:00:00Z",
                     "generatorURL": "http://localhost:9090/graph",
-                    "fingerprint": "payment-5xx-fingerprint",
+                    "fingerprint": fingerprint,
                 },
                 {
                     "status": "resolved",
@@ -92,12 +98,15 @@ def test_alertmanager_webhook_processes_only_firing_alerts() -> None:
     assert data["metadata"]["ignored"] == 1
     task = data["tasks"][0]
     task_detail = _get_task(task["task_id"])
+    assert task_detail["status"] == "waiting_review"
+
+    task_detail = _approve_pending_reviews(task["task_id"])
     assert task_detail["status"] == "succeeded"
     assert task_detail["source"] == "alertmanager"
     result = task_detail["result"]
     assert result["metadata"]["service"] == "payment-api"
     assert result["metadata"]["trigger"]["source"] == "alertmanager"
-    assert result["metadata"]["trigger"]["alert_id"] == "payment-5xx-fingerprint"
+    assert result["metadata"]["trigger"]["alert_id"] == fingerprint
 
 
 def test_alertmanager_webhook_deduplicates_repeated_firing_alert() -> None:
@@ -247,3 +256,21 @@ def _get_task_event_types(task_id: str) -> list[str]:
     response = client.get(f"/api/tasks/{task_id}/events")
     assert response.status_code == 200
     return [event["event_type"] for event in response.json()]
+
+
+def _approve_pending_reviews(task_id: str) -> dict:
+    reviews_response = client.get(f"/api/tasks/{task_id}/reviews")
+    assert reviews_response.status_code == 200
+    reviews = reviews_response.json()
+    assert reviews
+
+    for review in reviews:
+        if review["status"] != "pending":
+            continue
+        approve_response = client.post(
+            f"/api/reviews/{review['review_id']}/approve",
+            json={"reviewer": "test", "reason": "Approved in test."},
+        )
+        assert approve_response.status_code == 200
+
+    return _get_task(task_id)

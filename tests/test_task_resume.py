@@ -63,7 +63,10 @@ def test_failed_task_can_resume_from_latest_completed_checkpoint() -> None:
     assert resume_task["run_id"] != task.run_id
     assert resume_task["trigger_metadata"]["resume"]["after_node"] == "execute_tools"
 
-    completed_resume = _get_task(resume_task["task_id"])
+    waiting_resume = _get_task(resume_task["task_id"])
+    assert waiting_resume["status"] == "waiting_review"
+
+    completed_resume = _approve_pending_reviews(resume_task["task_id"])
     assert completed_resume["status"] == "succeeded"
     assert completed_resume["result"]["metadata"]["trigger"]["resume"]["of_task_id"] == task.task_id
 
@@ -103,6 +106,7 @@ def test_succeeded_task_requires_force_to_resume() -> None:
     )
     assert response.status_code == 202
     task_id = response.json()["tasks"][0]["task_id"]
+    assert _approve_pending_reviews(task_id)["status"] == "succeeded"
 
     resume_response = client.post(
         f"/api/tasks/{task_id}/resume",
@@ -131,3 +135,21 @@ def _get_task_events(task_id: str) -> list[dict]:
     response = client.get(f"/api/tasks/{task_id}/events")
     assert response.status_code == 200
     return response.json()
+
+
+def _approve_pending_reviews(task_id: str) -> dict:
+    reviews_response = client.get(f"/api/tasks/{task_id}/reviews")
+    assert reviews_response.status_code == 200
+    reviews = reviews_response.json()
+    assert reviews
+
+    for review in reviews:
+        if review["status"] != "pending":
+            continue
+        approve_response = client.post(
+            f"/api/reviews/{review['review_id']}/approve",
+            json={"reviewer": "test", "reason": "Approved in test."},
+        )
+        assert approve_response.status_code == 200
+
+    return _get_task(task_id)

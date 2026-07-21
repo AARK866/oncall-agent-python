@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.agents import GraphExecutionCancelled, OpsAgent
+from app.agents import GraphExecutionCancelled, GraphExecutionPaused, OpsAgent
 from app.config import settings
 from app.schemas import (
     AlertGroupRecord,
@@ -15,6 +15,7 @@ from app.schemas import (
     DiagnosisTaskRecord,
     DiagnosisTaskStatus,
     HumanReviewRequestRecord,
+    HumanReviewStatus,
     OpsGraphCheckpointRecord,
 )
 from app.storage import SQLiteIncidentStore, SQLiteTaskStore
@@ -107,6 +108,7 @@ class DiagnosisTaskQueue:
             if latest_task and latest_task.status in {
                 DiagnosisTaskStatus.queued,
                 DiagnosisTaskStatus.running,
+                DiagnosisTaskStatus.waiting_review,
                 DiagnosisTaskStatus.cancel_requested,
                 DiagnosisTaskStatus.succeeded,
             }:
@@ -155,6 +157,7 @@ class DiagnosisTaskQueue:
             in {
                 DiagnosisTaskStatus.queued,
                 DiagnosisTaskStatus.running,
+                DiagnosisTaskStatus.waiting_review,
                 DiagnosisTaskStatus.cancel_requested,
             }
             and not force
@@ -292,7 +295,10 @@ class DiagnosisTaskQueue:
         }:
             raise ValueError("Only queued or running tasks can be canceled.")
 
-        if task.status == DiagnosisTaskStatus.queued:
+        if task.status in {
+            DiagnosisTaskStatus.queued,
+            DiagnosisTaskStatus.waiting_review,
+        }:
             self.task_store.mark_cancel_requested(
                 task_id=task.task_id,
                 requested_by=requested_by,
@@ -359,7 +365,13 @@ class DiagnosisTaskQueue:
             if queued_task.status == DiagnosisTaskStatus.cancel_requested:
                 self.task_store.mark_canceled(task_id, reason="Canceled before execution.")
             return
-        if queued_task.status != DiagnosisTaskStatus.queued:
+        if queued_task.status not in {
+            DiagnosisTaskStatus.queued,
+            DiagnosisTaskStatus.waiting_review,
+        }:
+            return
+        should_resume_after_review = queued_task.status == DiagnosisTaskStatus.waiting_review
+        if should_resume_after_review and not self._all_reviews_approved(task_id):
             return
 
         task = self.task_store.mark_running(task_id)
@@ -373,7 +385,22 @@ class DiagnosisTaskQueue:
                 incident_store=self.incident_store,
                 should_cancel=self.task_store.is_cancel_requested,
             )
-            if task.resume_of_task_id:
+            if should_resume_after_review:
+                checkpoint = self._latest_paused_checkpoint(task.task_id, task.run_id)
+                if checkpoint is None:
+                    raise RuntimeError("Waiting review task has no paused checkpoint.")
+                response = await agent.resume(
+                    checkpoint=checkpoint,
+                    question=task.question,
+                    session_id=task.session_id,
+                    service=task.service,
+                    severity=task.severity,
+                    labels=task.labels,
+                    trigger_metadata=trigger_metadata,
+                    thread_id=task.thread_id,
+                    run_id=task.run_id,
+                )
+            elif task.resume_of_task_id:
                 checkpoint = self._resume_checkpoint(task)
                 response = await agent.resume(
                     checkpoint=checkpoint,
@@ -400,6 +427,19 @@ class DiagnosisTaskQueue:
         except GraphExecutionCancelled as exc:
             self.task_store.mark_canceled(task_id, reason=str(exc))
             return
+        except GraphExecutionPaused as exc:
+            response = exc.response or self._response_from_latest_paused_checkpoint(task_id, task.run_id)
+            if response is None:
+                self.task_store.mark_failed(task_id, str(exc))
+                return
+            self._sync_human_review_metadata(task_id, response)
+            self.task_store.mark_waiting_review(
+                task_id=task_id,
+                response=response,
+                review_ids=exc.review_ids,
+                reason=str(exc),
+            )
+            return
         except Exception as exc:
             self.task_store.mark_failed(task_id, str(exc))
             return
@@ -409,6 +449,7 @@ class DiagnosisTaskQueue:
             return
 
         self._record_response_events(task_id, response)
+        self._sync_human_review_metadata(task_id, response)
         self.task_store.mark_succeeded(task_id, response)
         if task.alert_group_id:
             self.task_store.mark_alert_group_diagnosed(task.alert_group_id, response)
@@ -433,6 +474,25 @@ class DiagnosisTaskQueue:
 
     def human_reviews(self, task_id: str) -> list[HumanReviewRequestRecord]:
         return self.task_store.list_human_review_requests_for_task(task_id)
+
+    def reject_after_review(
+        self,
+        review: HumanReviewRequestRecord,
+        reason: str | None = None,
+    ) -> DiagnosisTaskRecord | None:
+        task = self.task_store.get_task(review.task_id)
+        if task is None or task.status != DiagnosisTaskStatus.waiting_review:
+            return task
+
+        response = task.result
+        if response is not None:
+            self._sync_human_review_metadata(task.task_id, response)
+
+        return self.task_store.mark_failed(
+            task_id=task.task_id,
+            error=reason or "Human review rejected the proposed high-risk actions.",
+            response=response,
+        )
 
     def get_alert_group(self, group_id: str) -> AlertGroupRecord | None:
         return self.task_store.get_alert_group(group_id)
@@ -493,14 +553,75 @@ class DiagnosisTaskQueue:
         task_id: str,
         run_id: str | None,
     ) -> OpsGraphCheckpointRecord | None:
+        return self._latest_checkpoint(task_id=task_id, run_id=run_id, status="completed")
+
+    def _latest_paused_checkpoint(
+        self,
+        task_id: str,
+        run_id: str | None,
+    ) -> OpsGraphCheckpointRecord | None:
+        return self._latest_checkpoint(task_id=task_id, run_id=run_id, status="paused")
+
+    def _latest_checkpoint(
+        self,
+        task_id: str,
+        run_id: str | None,
+        status: str,
+    ) -> OpsGraphCheckpointRecord | None:
         checkpoints = self.task_store.list_graph_checkpoints(task_id)
-        completed = [
+        matches = [
             checkpoint
             for checkpoint in checkpoints
-            if checkpoint.status == "completed"
+            if checkpoint.status == status
             and (run_id is None or checkpoint.run_id == run_id)
         ]
-        return completed[-1] if completed else None
+        return matches[-1] if matches else None
+
+    def _response_from_latest_paused_checkpoint(
+        self,
+        task_id: str,
+        run_id: str | None,
+    ) -> ChatResponse | None:
+        checkpoint = self._latest_paused_checkpoint(task_id, run_id)
+        if checkpoint is None:
+            return None
+        response_data = checkpoint.state.get("response")
+        if response_data is None:
+            return None
+        return ChatResponse.model_validate(response_data)
+
+    def _all_reviews_approved(self, task_id: str) -> bool:
+        reviews = self.task_store.list_human_review_requests_for_task(task_id)
+        return bool(reviews) and all(
+            review.status == HumanReviewStatus.approved
+            for review in reviews
+        )
+
+    def _sync_human_review_metadata(self, task_id: str, response: ChatResponse) -> None:
+        reviews = self.task_store.list_human_review_requests_for_task(task_id)
+        if not reviews:
+            return
+
+        if any(review.status == HumanReviewStatus.pending for review in reviews):
+            status = HumanReviewStatus.pending
+        elif any(review.status == HumanReviewStatus.rejected for review in reviews):
+            status = HumanReviewStatus.rejected
+        else:
+            status = HumanReviewStatus.approved
+
+        human_review = response.metadata.get("human_review")
+        if not isinstance(human_review, dict):
+            human_review = {}
+
+        human_review.update(
+            {
+                "required": True,
+                "status": status.value,
+                "review_ids": [review.review_id for review in reviews],
+                "requests": [review.model_dump(mode="json") for review in reviews],
+            }
+        )
+        response.metadata["human_review"] = human_review
 
     def _resume_checkpoint(self, task: DiagnosisTaskRecord) -> OpsGraphCheckpointRecord | None:
         resume_metadata = task.trigger_metadata.get("resume")

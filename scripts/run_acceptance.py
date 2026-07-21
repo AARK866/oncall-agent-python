@@ -168,6 +168,11 @@ async def _check_alert_flow(
         )
 
     task = await _wait_for_task(client, tasks[0]["task_id"])
+    approved_reviews = 0
+    if task.get("status") == "waiting_review":
+        approved_reviews = await _approve_pending_reviews(client, str(task["task_id"]))
+        task = await _wait_for_task(client, str(task["task_id"]))
+
     result = task.get("result") or {}
     metadata = result.get("metadata", {})
     incident_id = str(metadata.get("incident_id") or "")
@@ -189,6 +194,7 @@ async def _check_alert_flow(
                 "task_id": task["task_id"],
                 "incident_id": incident_id,
                 "alert_group_id": group_id,
+                "approved_reviews": approved_reviews,
                 "connector": metadata.get("tool_connector", {}),
             },
         ),
@@ -204,7 +210,15 @@ async def _check_task_events(client: httpx.AsyncClient, task_id: str) -> Accepta
 
     events = await _get_json(client, f"/api/tasks/{task_id}/events")
     event_types = [event.get("event_type") for event in events]
-    required_events = {"queued", "running", "retrieved_docs", "incident_persisted", "succeeded"}
+    required_events = {
+        "queued",
+        "running",
+        "waiting_review",
+        "human_review_approved",
+        "retrieved_docs",
+        "incident_persisted",
+        "succeeded",
+    }
     missing = sorted(required_events - set(event_types))
     if missing:
         return AcceptanceCheck("task_events", "FAIL", f"missing events: {', '.join(missing)}")
@@ -244,6 +258,24 @@ async def _post_json(client: httpx.AsyncClient, path: str, payload: dict[str, An
     return response.json()
 
 
+async def _approve_pending_reviews(client: httpx.AsyncClient, task_id: str) -> int:
+    reviews = await _get_json(client, f"/api/tasks/{task_id}/reviews")
+    approved_count = 0
+    for review in reviews:
+        if review.get("status") != "pending":
+            continue
+        await _post_json(
+            client,
+            f"/api/reviews/{review['review_id']}/approve",
+            {
+                "reviewer": "acceptance",
+                "reason": "Acceptance check approves high-risk action gate.",
+            },
+        )
+        approved_count += 1
+    return approved_count
+
+
 async def _post_signed_alertmanager(client: httpx.AsyncClient, payload: dict[str, Any]) -> dict[str, Any]:
     if not settings.webhook_secret:
         return await _post_json(client, "/api/alerts/alertmanager", payload)
@@ -271,7 +303,7 @@ async def _wait_for_task(
     task: dict[str, Any] = {}
     for _ in range(attempts):
         task = await _get_json(client, f"/api/tasks/{task_id}")
-        if task.get("status") in {"succeeded", "failed"}:
+        if task.get("status") in {"succeeded", "failed", "waiting_review"}:
             return task
         await asyncio.sleep(interval)
     return task
