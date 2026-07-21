@@ -45,6 +45,7 @@ class AlertGroupStatus(str, Enum):
 class DiagnosisTaskEventType(str, Enum):
     queued = "queued"
     running = "running"
+    rerun_requested = "rerun_requested"
     graph_node_started = "graph_node_started"
     graph_node_completed = "graph_node_completed"
     graph_node_failed = "graph_node_failed"
@@ -160,6 +161,7 @@ class ChatResponse(BaseModel):
 class DiagnosisTaskRecord(BaseModel):
     task_id: str
     alert_group_id: str | None = None
+    rerun_of_task_id: str | None = None
     source: str
     status: DiagnosisTaskStatus
     question: str
@@ -240,6 +242,12 @@ class HumanReviewRequestRecord(BaseModel):
 class HumanReviewDecisionRequest(BaseModel):
     reviewer: str = Field(default="manual")
     reason: str | None = None
+
+
+class DiagnosisTaskRerunRequest(BaseModel):
+    requested_by: str = Field(default="manual", min_length=1, max_length=120)
+    reason: str | None = Field(default=None, max_length=1000)
+    force: bool = False
 
 
 class AlertTriggerResponse(BaseModel):

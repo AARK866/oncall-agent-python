@@ -40,3 +40,4 @@ Docs:
 - Error recovery: `docs/error-recovery.md`
 - Human review: `docs/human-review.md`
 - Retry policy: `docs/retry-policy.md`
+- Task rerun: `docs/task-rerun.md`

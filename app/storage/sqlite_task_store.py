@@ -39,6 +39,7 @@ class SQLiteTaskStore:
         question: str,
         session_id: str,
         alert_group_id: str | None = None,
+        rerun_of_task_id: str | None = None,
         service: str | None = None,
         severity: AlertSeverity = AlertSeverity.warning,
         labels: dict[str, str] | None = None,
@@ -48,6 +49,7 @@ class SQLiteTaskStore:
         task = DiagnosisTaskRecord(
             task_id=f"task_{uuid4().hex}",
             alert_group_id=alert_group_id,
+            rerun_of_task_id=rerun_of_task_id,
             source=source,
             status=DiagnosisTaskStatus.queued,
             question=question,
@@ -64,11 +66,12 @@ class SQLiteTaskStore:
             connection.execute(
                 """
                 INSERT INTO diagnosis_tasks (
-                    task_id, alert_group_id, source, status, question, session_id, service, severity,
+                    task_id, alert_group_id, rerun_of_task_id, source, status,
+                    question, session_id, service, severity,
                     labels_json, trigger_metadata_json, result_json, incident_id,
                     diagnosis_id, error, created_at, updated_at, started_at, finished_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 _task_values(task),
             )
@@ -525,6 +528,18 @@ class SQLiteTaskStore:
             ).fetchall()
         return [_task_from_row(row) for row in rows]
 
+    def list_task_reruns(self, task_id: str) -> list[DiagnosisTaskRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM diagnosis_tasks
+                WHERE rerun_of_task_id = ?
+                ORDER BY created_at ASC
+                """,
+                (task_id,),
+            ).fetchall()
+        return [_task_from_row(row) for row in rows]
+
     def list_alert_groups(self, limit: int = 20) -> list[AlertGroupRecord]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -568,6 +583,7 @@ class SQLiteTaskStore:
                 CREATE TABLE IF NOT EXISTS diagnosis_tasks (
                     task_id TEXT PRIMARY KEY,
                     alert_group_id TEXT,
+                    rerun_of_task_id TEXT,
                     source TEXT NOT NULL,
                     status TEXT NOT NULL,
                     question TEXT NOT NULL,
@@ -588,6 +604,13 @@ class SQLiteTaskStore:
                 """
             )
             _ensure_column(connection, "diagnosis_tasks", "alert_group_id", "TEXT")
+            _ensure_column(connection, "diagnosis_tasks", "rerun_of_task_id", "TEXT")
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_diagnosis_tasks_rerun_of
+                ON diagnosis_tasks (rerun_of_task_id, created_at)
+                """
+            )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS alert_groups (
@@ -685,6 +708,7 @@ def _task_values(task: DiagnosisTaskRecord) -> tuple[Any, ...]:
     return (
         task.task_id,
         task.alert_group_id,
+        task.rerun_of_task_id,
         task.source,
         task.status.value,
         task.question,
@@ -770,6 +794,7 @@ def _task_from_row(row: sqlite3.Row) -> DiagnosisTaskRecord:
     return DiagnosisTaskRecord(
         task_id=row["task_id"],
         alert_group_id=row["alert_group_id"],
+        rerun_of_task_id=row["rerun_of_task_id"],
         source=row["source"],
         status=DiagnosisTaskStatus(row["status"]),
         question=row["question"],

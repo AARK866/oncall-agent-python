@@ -49,6 +49,7 @@ class DiagnosisTaskQueue:
         question: str,
         session_id: str,
         alert_group_id: str | None = None,
+        rerun_of_task_id: str | None = None,
         service: str | None = None,
         severity: AlertSeverity = AlertSeverity.warning,
         labels: dict[str, str] | None = None,
@@ -59,6 +60,7 @@ class DiagnosisTaskQueue:
             question=question,
             session_id=session_id,
             alert_group_id=alert_group_id,
+            rerun_of_task_id=rerun_of_task_id,
             service=service,
             severity=severity,
             labels=labels,
@@ -124,6 +126,64 @@ class DiagnosisTaskQueue:
             deduplicated=False,
         )
 
+    def rerun(
+        self,
+        task_id: str,
+        requested_by: str = "manual",
+        reason: str | None = None,
+        force: bool = False,
+    ) -> DiagnosisTaskRecord:
+        original = self.task_store.get_task(task_id)
+        if original is None:
+            raise KeyError(f"Diagnosis task not found: {task_id}")
+
+        if original.status in {DiagnosisTaskStatus.queued, DiagnosisTaskStatus.running} and not force:
+            raise ValueError("Only terminal tasks can be rerun unless force is true.")
+
+        existing_rerun = original.trigger_metadata.get("rerun")
+        root_task_id = (
+            existing_rerun.get("root_task_id")
+            if isinstance(existing_rerun, dict) and existing_rerun.get("root_task_id")
+            else original.task_id
+        )
+        trigger_metadata = dict(original.trigger_metadata)
+        trigger_metadata["rerun"] = {
+            "of_task_id": original.task_id,
+            "root_task_id": root_task_id,
+            "requested_by": requested_by,
+            "reason": reason,
+            "force": force,
+            "original_status": original.status.value,
+            "original_error": original.error,
+        }
+
+        new_task = self.submit(
+            source=original.source,
+            question=original.question,
+            session_id=original.session_id,
+            alert_group_id=original.alert_group_id,
+            rerun_of_task_id=original.task_id,
+            service=original.service,
+            severity=original.severity,
+            labels=dict(original.labels),
+            trigger_metadata=trigger_metadata,
+        )
+        if original.alert_group_id:
+            self.task_store.attach_task_to_alert_group(original.alert_group_id, new_task.task_id)
+
+        self.task_store.append_event(
+            task_id=original.task_id,
+            event_type=DiagnosisTaskEventType.rerun_requested,
+            message="Diagnosis task rerun requested.",
+            data={
+                "new_task_id": new_task.task_id,
+                "requested_by": requested_by,
+                "reason": reason,
+                "force": force,
+            },
+        )
+        return new_task
+
     def resolve_alert(self, dedupe_key: str) -> AlertGroupRecord | None:
         return self.task_store.resolve_alert_group(dedupe_key)
 
@@ -155,6 +215,9 @@ class DiagnosisTaskQueue:
 
     def list(self, limit: int = 20) -> list[DiagnosisTaskRecord]:
         return self.task_store.list_tasks(limit=limit)
+
+    def reruns(self, task_id: str) -> list[DiagnosisTaskRecord]:
+        return self.task_store.list_task_reruns(task_id)
 
     def events(self, task_id: str) -> list[DiagnosisTaskEventRecord]:
         return self.task_store.list_events(task_id)

@@ -75,6 +75,7 @@ Progress event types:
 
 - `queued`: task accepted by the API
 - `running`: background runner started
+- `rerun_requested`: operator requested a new diagnosis task from this task
 - `tool_result`: an ops tool finished, such as Prometheus, Loki, GitHub, or topology
 - `retrieved_docs`: runbook retrieval finished
 - `incident_persisted`: incident and diagnosis records were written
