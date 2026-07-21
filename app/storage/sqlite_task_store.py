@@ -40,6 +40,7 @@ class SQLiteTaskStore:
         session_id: str,
         alert_group_id: str | None = None,
         rerun_of_task_id: str | None = None,
+        resume_of_task_id: str | None = None,
         thread_id: str | None = None,
         run_id: str | None = None,
         service: str | None = None,
@@ -52,6 +53,7 @@ class SQLiteTaskStore:
             task_id=f"task_{uuid4().hex}",
             alert_group_id=alert_group_id,
             rerun_of_task_id=rerun_of_task_id,
+            resume_of_task_id=resume_of_task_id,
             thread_id=thread_id or f"thread_{uuid4().hex}",
             run_id=run_id or f"run_{uuid4().hex}",
             source=source,
@@ -70,12 +72,12 @@ class SQLiteTaskStore:
             connection.execute(
                 """
                 INSERT INTO diagnosis_tasks (
-                    task_id, alert_group_id, rerun_of_task_id, thread_id, run_id,
-                    source, status, question, session_id, service, severity,
+                    task_id, alert_group_id, rerun_of_task_id, resume_of_task_id,
+                    thread_id, run_id, source, status, question, session_id, service, severity,
                     labels_json, trigger_metadata_json, result_json, incident_id,
                     diagnosis_id, error, created_at, updated_at, started_at, finished_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 _task_values(task),
             )
@@ -498,6 +500,14 @@ class SQLiteTaskStore:
             ).fetchone()
         return _human_review_from_row(row) if row else None
 
+    def get_graph_checkpoint(self, checkpoint_id: str) -> OpsGraphCheckpointRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM ops_graph_checkpoints WHERE checkpoint_id = ?",
+                (checkpoint_id,),
+            ).fetchone()
+        return _checkpoint_from_row(row) if row else None
+
     def require_human_review_request(self, review_id: str) -> HumanReviewRequestRecord:
         review = self.get_human_review_request(review_id)
         if review is None:
@@ -659,6 +669,18 @@ class SQLiteTaskStore:
             ).fetchall()
         return [_task_from_row(row) for row in rows]
 
+    def list_task_resumes(self, task_id: str) -> list[DiagnosisTaskRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM diagnosis_tasks
+                WHERE resume_of_task_id = ?
+                ORDER BY created_at ASC
+                """,
+                (task_id,),
+            ).fetchall()
+        return [_task_from_row(row) for row in rows]
+
     def list_stale_active_tasks(
         self,
         max_age_seconds: int,
@@ -727,6 +749,7 @@ class SQLiteTaskStore:
                     task_id TEXT PRIMARY KEY,
                     alert_group_id TEXT,
                     rerun_of_task_id TEXT,
+                    resume_of_task_id TEXT,
                     thread_id TEXT,
                     run_id TEXT,
                     source TEXT NOT NULL,
@@ -750,12 +773,19 @@ class SQLiteTaskStore:
             )
             _ensure_column(connection, "diagnosis_tasks", "alert_group_id", "TEXT")
             _ensure_column(connection, "diagnosis_tasks", "rerun_of_task_id", "TEXT")
+            _ensure_column(connection, "diagnosis_tasks", "resume_of_task_id", "TEXT")
             _ensure_column(connection, "diagnosis_tasks", "thread_id", "TEXT")
             _ensure_column(connection, "diagnosis_tasks", "run_id", "TEXT")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_diagnosis_tasks_rerun_of
                 ON diagnosis_tasks (rerun_of_task_id, created_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_diagnosis_tasks_resume_of
+                ON diagnosis_tasks (resume_of_task_id, created_at)
                 """
             )
             connection.execute(
@@ -878,6 +908,7 @@ def _task_values(task: DiagnosisTaskRecord) -> tuple[Any, ...]:
         task.task_id,
         task.alert_group_id,
         task.rerun_of_task_id,
+        task.resume_of_task_id,
         task.thread_id,
         task.run_id,
         task.source,
@@ -968,6 +999,7 @@ def _task_from_row(row: sqlite3.Row) -> DiagnosisTaskRecord:
         task_id=row["task_id"],
         alert_group_id=row["alert_group_id"],
         rerun_of_task_id=row["rerun_of_task_id"],
+        resume_of_task_id=row["resume_of_task_id"],
         thread_id=row["thread_id"],
         run_id=row["run_id"],
         source=row["source"],

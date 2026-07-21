@@ -79,6 +79,7 @@ Progress event types:
 - `queued`: task accepted by the API
 - `running`: background runner started
 - `rerun_requested`: operator requested a new diagnosis task from this task
+- `resume_requested`: operator requested a new task from the latest completed checkpoint
 - `cancel_requested`: operator requested cancellation
 - `canceled`: task stopped before completion
 - `timed_out`: watchdog marked a stale running task as timed out

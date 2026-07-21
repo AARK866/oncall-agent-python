@@ -2,6 +2,9 @@
 
 This step adds a manual rerun entrypoint for diagnosis tasks.
 
+`rerun` starts a new diagnosis from the beginning. Use `resume` when you want to
+continue from the latest completed graph checkpoint instead.
+
 ## Why
 
 Production diagnosis may fail because a dependent system is temporarily down, a

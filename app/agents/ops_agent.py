@@ -7,7 +7,14 @@ from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
 from app.config import settings
 from app.llm import LLMClient, create_llm_client
-from app.schemas import AlertSeverity, ChatMode, ChatResponse, DiagnosisReport, ToolResult
+from app.schemas import (
+    AlertSeverity,
+    ChatMode,
+    ChatResponse,
+    DiagnosisReport,
+    OpsGraphCheckpointRecord,
+    ToolResult,
+)
 from app.storage import SQLiteIncidentStore
 from app.tools import ToolRegistry, create_ops_tool_registry
 
@@ -72,6 +79,30 @@ class OpsAgent:
         run_id: str | None = None,
     ) -> ChatResponse:
         return await self.graph.run(
+            question=question,
+            session_id=session_id,
+            service=service,
+            alert_severity=severity,
+            alert_labels=labels,
+            trigger_metadata=trigger_metadata,
+            thread_id=thread_id,
+            run_id=run_id,
+        )
+
+    async def resume(
+        self,
+        checkpoint: OpsGraphCheckpointRecord | None,
+        question: str,
+        session_id: str,
+        service: str | None = None,
+        severity: AlertSeverity | None = None,
+        labels: dict[str, str] | None = None,
+        trigger_metadata: dict[str, object] | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+    ) -> ChatResponse:
+        return await self.graph.resume(
+            checkpoint=checkpoint,
             question=question,
             session_id=session_id,
             service=service,

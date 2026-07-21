@@ -67,5 +67,6 @@ The graph now has the two ingredients needed for real resume:
 thread_id + native checkpointer
 ```
 
-The next deep step can use this foundation to continue from an interrupted
-LangGraph thread instead of rerunning the whole diagnosis from the beginning.
+Node-level resume now uses this foundation together with the readable SQLite
+checkpoint snapshots to continue after the latest completed node instead of
+rerunning the whole diagnosis from the beginning.

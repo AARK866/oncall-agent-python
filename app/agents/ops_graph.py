@@ -15,6 +15,7 @@ from app.schemas import (
     ChatResponse,
     DiagnosisReport,
     DiagnosisTaskEventType,
+    OpsGraphCheckpointRecord,
     PlanTrace,
     ReactStep,
     ToolCall,
@@ -141,6 +142,64 @@ class OpsGraphWorkflow:
             raise RuntimeError("Ops graph completed without a response.")
         return state.response
 
+    async def resume(
+        self,
+        checkpoint: OpsGraphCheckpointRecord | None,
+        question: str,
+        session_id: str,
+        service: str | None = None,
+        alert_severity: AlertSeverity | None = None,
+        alert_labels: dict[str, str] | None = None,
+        trigger_metadata: dict[str, Any] | None = None,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+    ) -> ChatResponse:
+        metadata = dict(trigger_metadata or {})
+        checkpoint_thread_id = checkpoint.thread_id if checkpoint else None
+        resolved_thread_id = str(
+            thread_id
+            or metadata.get("thread_id")
+            or checkpoint_thread_id
+            or self._default_thread_id(session_id)
+        )
+        resolved_run_id = str(run_id or metadata.get("run_id") or f"run_{uuid4().hex}")
+        metadata.setdefault("thread_id", resolved_thread_id)
+        metadata.setdefault("run_id", resolved_run_id)
+
+        nodes = self._nodes()
+        state = self._state_from_checkpoint(
+            checkpoint=checkpoint,
+            question=question,
+            session_id=session_id,
+            service=service,
+            alert_severity=alert_severity,
+            alert_labels=alert_labels or {},
+            trigger_metadata=metadata,
+            thread_id=resolved_thread_id,
+            run_id=resolved_run_id,
+        )
+        remaining_nodes = self._remaining_nodes_after(
+            nodes,
+            checkpoint.node_name if checkpoint else None,
+        )
+        state.graph_trace = [name for name, _ in remaining_nodes]
+        self._refresh_response_identity(state)
+
+        runtime = self.graph_runtime.strip().lower()
+        if runtime == "langgraph":
+            await self._run_with_langgraph(state, remaining_nodes, strict=True)
+        elif runtime == "auto":
+            await self._run_with_langgraph(state, remaining_nodes, strict=False)
+        elif runtime == "local":
+            await self._run_local(state, remaining_nodes, reason="resume_from_checkpoint")
+        else:
+            raise ValueError(f"Unsupported OPS_GRAPH_RUNTIME: {self.graph_runtime}")
+
+        self._refresh_response_identity(state)
+        if state.response is None:
+            raise RuntimeError("Ops graph resume completed without a response.")
+        return state.response
+
     async def _run_local(
         self,
         state: OpsGraphState,
@@ -234,12 +293,14 @@ class OpsGraphWorkflow:
         node: Callable[[OpsGraphState], Any],
     ) -> None:
         self._raise_if_cancel_requested(state, name)
+        self._refresh_response_identity(state)
         self._save_checkpoint(state, name, "started")
         try:
             await node(state)
         except Exception as exc:
             self._save_checkpoint(state, name, "failed", error=str(exc))
             raise
+        self._refresh_response_identity(state)
         self._save_checkpoint(state, name, "completed")
 
     def _raise_if_cancel_requested(self, state: OpsGraphState, node_name: str) -> None:
@@ -315,9 +376,19 @@ class OpsGraphWorkflow:
             "alert_severity": state.alert_severity.value if state.alert_severity else None,
             "alert_labels": state.alert_labels,
             "trigger_metadata": state.trigger_metadata,
+            "plan_trace": _dump_model(state.plan_trace) if state.plan_trace else None,
             "selected_tool_calls": [_dump_model(call) for call in state.selected_tool_calls],
             "tool_selection_metadata": state.tool_selection_metadata,
+            "react_steps": [_dump_model(step) for step in state.react_steps],
             "tool_results": [_dump_model(result) for result in state.tool_results],
+            "knowledge_response": _dump_model(state.knowledge_response)
+            if state.knowledge_response
+            else None,
+            "fallback_report": _dump_model(state.fallback_report)
+            if state.fallback_report
+            else None,
+            "report": _dump_model(state.report) if state.report else None,
+            "response": _dump_model(state.response) if state.response else None,
             "source_doc_ids": [
                 source.doc_id
                 for source in state.knowledge_response.sources
@@ -339,6 +410,83 @@ class OpsGraphWorkflow:
             "graph_runtime_reason": state.graph_runtime_reason,
             "graph_checkpointer": state.graph_checkpointer,
             "graph_trace": state.graph_trace,
+        }
+
+    def _state_from_checkpoint(
+        self,
+        checkpoint: OpsGraphCheckpointRecord | None,
+        question: str,
+        session_id: str,
+        service: str | None,
+        alert_severity: AlertSeverity | None,
+        alert_labels: dict[str, str],
+        trigger_metadata: dict[str, Any],
+        thread_id: str,
+        run_id: str,
+    ) -> OpsGraphState:
+        snapshot = checkpoint.state if checkpoint else {}
+        state = OpsGraphState(
+            question=str(snapshot.get("question") or question),
+            session_id=str(snapshot.get("session_id") or session_id),
+            thread_id=thread_id,
+            run_id=run_id,
+            requested_service=snapshot.get("requested_service") or service,
+            alert_severity=_alert_severity(snapshot.get("alert_severity"), alert_severity),
+            alert_labels=snapshot.get("alert_labels") or alert_labels,
+            trigger_metadata=trigger_metadata,
+            service=snapshot.get("service") or service,
+            plan_trace=_optional_model(snapshot.get("plan_trace"), PlanTrace),
+            selected_tool_calls=_model_list(snapshot.get("selected_tool_calls"), ToolCall),
+            tool_selection_metadata=snapshot.get("tool_selection_metadata") or {},
+            react_steps=_model_list(snapshot.get("react_steps"), ReactStep),
+            tool_results=_model_list(snapshot.get("tool_results"), ToolResult),
+            knowledge_response=_optional_model(snapshot.get("knowledge_response"), ChatResponse),
+            fallback_report=_optional_model(snapshot.get("fallback_report"), DiagnosisReport),
+            report=_optional_model(snapshot.get("report"), DiagnosisReport),
+            human_review_requests=snapshot.get("human_review_requests") or [],
+            summary_metadata=snapshot.get("summary_metadata") or {},
+            response=_optional_model(snapshot.get("response"), ChatResponse),
+            graph_runtime=snapshot.get("graph_runtime") or "local",
+            graph_runtime_reason=snapshot.get("graph_runtime_reason") or "restored",
+            graph_checkpointer=snapshot.get("graph_checkpointer") or "not_used",
+        )
+        return state
+
+    def _remaining_nodes_after(
+        self,
+        nodes: list[tuple[str, Callable[[OpsGraphState], Any]]],
+        node_name: str | None,
+    ) -> list[tuple[str, Callable[[OpsGraphState], Any]]]:
+        if node_name is None:
+            return nodes
+
+        node_names = [name for name, _ in nodes]
+        if node_name not in node_names:
+            raise ValueError(f"Checkpoint node is not in the ops graph: {node_name}")
+
+        next_index = node_names.index(node_name) + 1
+        if next_index >= len(nodes):
+            raise ValueError("No remaining graph nodes to resume.")
+        return nodes[next_index:]
+
+    def _refresh_response_identity(self, state: OpsGraphState) -> None:
+        if state.response is None:
+            return
+
+        state.response.session_id = state.session_id
+        state.response.metadata["trigger"] = state.trigger_metadata
+        state.response.metadata["graph_run"] = {
+            "thread_id": state.thread_id,
+            "run_id": state.run_id,
+        }
+        state.response.metadata["graph_trace"] = state.graph_trace
+        state.response.metadata["graph_runtime"] = {
+            "requested": self.graph_runtime,
+            "used": state.graph_runtime,
+            "reason": state.graph_runtime_reason,
+            "checkpointer_requested": self.graph_checkpointer,
+            "checkpointer_used": state.graph_checkpointer,
+            "langgraph_available": self._is_langgraph_available(),
         }
 
     def _nodes(self) -> list[tuple[str, Callable[[OpsGraphState], Any]]]:
@@ -542,3 +690,25 @@ def _dump_model(value: Any) -> Any:
     if callable(model_dump):
         return model_dump(mode="json")
     return value
+
+
+def _optional_model(value: Any, model_type: type[Any]) -> Any | None:
+    if value is None:
+        return None
+    return model_type.model_validate(value)
+
+
+def _model_list(values: Any, model_type: type[Any]) -> list[Any]:
+    if not values:
+        return []
+    if not isinstance(values, list):
+        raise ValueError("Checkpoint state expected a list.")
+    return [model_type.model_validate(value) for value in values]
+
+
+def _alert_severity(value: Any, fallback: AlertSeverity | None) -> AlertSeverity | None:
+    if value is None:
+        return fallback
+    if isinstance(value, AlertSeverity):
+        return value
+    return AlertSeverity(str(value))

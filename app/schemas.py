@@ -49,6 +49,7 @@ class DiagnosisTaskEventType(str, Enum):
     queued = "queued"
     running = "running"
     rerun_requested = "rerun_requested"
+    resume_requested = "resume_requested"
     cancel_requested = "cancel_requested"
     canceled = "canceled"
     timed_out = "timed_out"
@@ -169,6 +170,7 @@ class DiagnosisTaskRecord(BaseModel):
     task_id: str
     alert_group_id: str | None = None
     rerun_of_task_id: str | None = None
+    resume_of_task_id: str | None = None
     thread_id: str | None = None
     run_id: str | None = None
     source: str
@@ -256,6 +258,12 @@ class HumanReviewDecisionRequest(BaseModel):
 
 
 class DiagnosisTaskRerunRequest(BaseModel):
+    requested_by: str = Field(default="manual", min_length=1, max_length=120)
+    reason: str | None = Field(default=None, max_length=1000)
+    force: bool = False
+
+
+class DiagnosisTaskResumeRequest(BaseModel):
     requested_by: str = Field(default="manual", min_length=1, max_length=120)
     reason: str | None = Field(default=None, max_length=1000)
     force: bool = False

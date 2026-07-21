@@ -51,6 +51,7 @@ class DiagnosisTaskQueue:
         session_id: str,
         alert_group_id: str | None = None,
         rerun_of_task_id: str | None = None,
+        resume_of_task_id: str | None = None,
         thread_id: str | None = None,
         run_id: str | None = None,
         service: str | None = None,
@@ -64,6 +65,7 @@ class DiagnosisTaskQueue:
             session_id=session_id,
             alert_group_id=alert_group_id,
             rerun_of_task_id=rerun_of_task_id,
+            resume_of_task_id=resume_of_task_id,
             thread_id=thread_id,
             run_id=run_id,
             service=service,
@@ -204,6 +206,71 @@ class DiagnosisTaskQueue:
         )
         return new_task
 
+    def resume(
+        self,
+        task_id: str,
+        requested_by: str = "manual",
+        reason: str | None = None,
+        force: bool = False,
+    ) -> DiagnosisTaskRecord:
+        original = self.task_store.get_task(task_id)
+        if original is None:
+            raise KeyError(f"Diagnosis task not found: {task_id}")
+
+        if (
+            original.status
+            not in {
+                DiagnosisTaskStatus.failed,
+                DiagnosisTaskStatus.timed_out,
+                DiagnosisTaskStatus.canceled,
+            }
+            and not force
+        ):
+            raise ValueError("Only failed, timed out, or canceled tasks can be resumed unless force is true.")
+
+        checkpoint = self._latest_completed_checkpoint(original.task_id, original.run_id)
+        trigger_metadata = dict(original.trigger_metadata)
+        trigger_metadata["resume"] = {
+            "of_task_id": original.task_id,
+            "checkpoint_id": checkpoint.checkpoint_id if checkpoint else None,
+            "after_node": checkpoint.node_name if checkpoint else None,
+            "requested_by": requested_by,
+            "reason": reason,
+            "force": force,
+            "original_status": original.status.value,
+            "original_error": original.error,
+        }
+
+        new_task = self.submit(
+            source=original.source,
+            question=original.question,
+            session_id=original.session_id,
+            alert_group_id=original.alert_group_id,
+            resume_of_task_id=original.task_id,
+            thread_id=original.thread_id,
+            service=original.service,
+            severity=original.severity,
+            labels=dict(original.labels),
+            trigger_metadata=trigger_metadata,
+        )
+        if original.alert_group_id:
+            self.task_store.attach_task_to_alert_group(original.alert_group_id, new_task.task_id)
+
+        self.task_store.append_event(
+            task_id=original.task_id,
+            event_type=DiagnosisTaskEventType.resume_requested,
+            message="Diagnosis task resume requested.",
+            data={
+                "new_task_id": new_task.task_id,
+                "checkpoint_id": checkpoint.checkpoint_id if checkpoint else None,
+                "after_node": checkpoint.node_name if checkpoint else None,
+                "requested_by": requested_by,
+                "reason": reason,
+                "force": force,
+            },
+        )
+        return new_task
+
     def cancel(
         self,
         task_id: str,
@@ -302,19 +369,34 @@ class DiagnosisTaskQueue:
         trigger_metadata["thread_id"] = task.thread_id
         trigger_metadata["run_id"] = task.run_id
         try:
-            response = await OpsAgent.create_default(
+            agent = OpsAgent.create_default(
                 incident_store=self.incident_store,
                 should_cancel=self.task_store.is_cancel_requested,
-            ).analyze(
-                question=task.question,
-                session_id=task.session_id,
-                service=task.service,
-                severity=task.severity,
-                labels=task.labels,
-                trigger_metadata=trigger_metadata,
-                thread_id=task.thread_id,
-                run_id=task.run_id,
             )
+            if task.resume_of_task_id:
+                checkpoint = self._resume_checkpoint(task)
+                response = await agent.resume(
+                    checkpoint=checkpoint,
+                    question=task.question,
+                    session_id=task.session_id,
+                    service=task.service,
+                    severity=task.severity,
+                    labels=task.labels,
+                    trigger_metadata=trigger_metadata,
+                    thread_id=task.thread_id,
+                    run_id=task.run_id,
+                )
+            else:
+                response = await agent.analyze(
+                    question=task.question,
+                    session_id=task.session_id,
+                    service=task.service,
+                    severity=task.severity,
+                    labels=task.labels,
+                    trigger_metadata=trigger_metadata,
+                    thread_id=task.thread_id,
+                    run_id=task.run_id,
+                )
         except GraphExecutionCancelled as exc:
             self.task_store.mark_canceled(task_id, reason=str(exc))
             return
@@ -339,6 +421,9 @@ class DiagnosisTaskQueue:
 
     def reruns(self, task_id: str) -> list[DiagnosisTaskRecord]:
         return self.task_store.list_task_reruns(task_id)
+
+    def resumes(self, task_id: str) -> list[DiagnosisTaskRecord]:
+        return self.task_store.list_task_resumes(task_id)
 
     def events(self, task_id: str) -> list[DiagnosisTaskEventRecord]:
         return self.task_store.list_events(task_id)
@@ -402,3 +487,35 @@ class DiagnosisTaskQueue:
                     "diagnosis_id": diagnosis_id,
                 },
             )
+
+    def _latest_completed_checkpoint(
+        self,
+        task_id: str,
+        run_id: str | None,
+    ) -> OpsGraphCheckpointRecord | None:
+        checkpoints = self.task_store.list_graph_checkpoints(task_id)
+        completed = [
+            checkpoint
+            for checkpoint in checkpoints
+            if checkpoint.status == "completed"
+            and (run_id is None or checkpoint.run_id == run_id)
+        ]
+        return completed[-1] if completed else None
+
+    def _resume_checkpoint(self, task: DiagnosisTaskRecord) -> OpsGraphCheckpointRecord | None:
+        resume_metadata = task.trigger_metadata.get("resume")
+        checkpoint_id = (
+            resume_metadata.get("checkpoint_id")
+            if isinstance(resume_metadata, dict)
+            else None
+        )
+        if checkpoint_id:
+            checkpoint = self.task_store.get_graph_checkpoint(str(checkpoint_id))
+            if checkpoint is not None:
+                return checkpoint
+
+        if task.resume_of_task_id:
+            source_task = self.task_store.require_task(task.resume_of_task_id)
+            return self._latest_completed_checkpoint(source_task.task_id, source_task.run_id)
+
+        return None
