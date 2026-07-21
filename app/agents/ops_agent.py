@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from app.agents.knowledge_agent import KnowledgeAgent
 from app.agents.llm_ops_assistant import LLMOpsAssistant
 from app.agents.ops_graph import OpsGraphWorkflow
@@ -19,6 +21,7 @@ class OpsAgent:
         knowledge_agent: KnowledgeAgent,
         incident_store: SQLiteIncidentStore | None = None,
         llm: LLMClient | None = None,
+        should_cancel: Callable[[str], bool] | None = None,
     ) -> None:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
@@ -38,6 +41,7 @@ class OpsAgent:
             format_report=self._format_report,
             persist_analysis=self._persist_analysis,
             graph_runtime=settings.ops_graph_runtime,
+            should_cancel=should_cancel,
         )
 
     @classmethod
@@ -45,12 +49,14 @@ class OpsAgent:
         cls,
         incident_store: SQLiteIncidentStore | None = None,
         llm: LLMClient | None = None,
+        should_cancel: Callable[[str], bool] | None = None,
     ) -> "OpsAgent":
         return cls(
             tool_registry=create_ops_tool_registry(),
             knowledge_agent=KnowledgeAgent.from_runbook_directory(),
             incident_store=incident_store or SQLiteIncidentStore.from_settings(),
             llm=llm,
+            should_cancel=should_cancel,
         )
 
     async def analyze(

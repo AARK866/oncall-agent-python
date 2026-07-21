@@ -68,6 +68,8 @@ Task statuses:
 
 - `queued`: accepted but not started
 - `running`: background worker is executing the diagnosis
+- `cancel_requested`: an operator asked the runner to stop at the next safe boundary
+- `canceled`: task stopped before completion
 - `succeeded`: diagnosis completed and result is stored
 - `failed`: diagnosis failed and `error` contains the failure message
 
@@ -76,6 +78,8 @@ Progress event types:
 - `queued`: task accepted by the API
 - `running`: background runner started
 - `rerun_requested`: operator requested a new diagnosis task from this task
+- `cancel_requested`: operator requested cancellation
+- `canceled`: task stopped before completion
 - `tool_result`: an ops tool finished, such as Prometheus, Loki, GitHub, or topology
 - `retrieved_docs`: runbook retrieval finished
 - `incident_persisted`: incident and diagnosis records were written

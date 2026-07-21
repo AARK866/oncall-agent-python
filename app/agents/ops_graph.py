@@ -23,6 +23,10 @@ from app.storage import SQLiteTaskStore
 from app.tools import ToolRegistry
 
 
+class GraphExecutionCancelled(Exception):
+    """Raised when a diagnosis graph should stop before the next node."""
+
+
 @dataclass
 class OpsGraphState:
     question: str
@@ -67,6 +71,7 @@ class OpsGraphWorkflow:
         ],
         graph_runtime: str = "local",
         checkpoint_store: SQLiteTaskStore | None = None,
+        should_cancel: Callable[[str], bool] | None = None,
     ) -> None:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
@@ -79,6 +84,7 @@ class OpsGraphWorkflow:
         self.persist_analysis = persist_analysis
         self.graph_runtime = graph_runtime
         self.checkpoint_store = checkpoint_store or SQLiteTaskStore.from_settings()
+        self.should_cancel = should_cancel
 
     async def run(
         self,
@@ -194,6 +200,7 @@ class OpsGraphWorkflow:
         name: str,
         node: Callable[[OpsGraphState], Any],
     ) -> None:
+        self._raise_if_cancel_requested(state, name)
         self._save_checkpoint(state, name, "started")
         try:
             await node(state)
@@ -201,6 +208,14 @@ class OpsGraphWorkflow:
             self._save_checkpoint(state, name, "failed", error=str(exc))
             raise
         self._save_checkpoint(state, name, "completed")
+
+    def _raise_if_cancel_requested(self, state: OpsGraphState, node_name: str) -> None:
+        task_id = self._task_id(state)
+        if not task_id or self.should_cancel is None or not self.should_cancel(task_id):
+            return
+
+        self._save_checkpoint(state, node_name, "canceled")
+        raise GraphExecutionCancelled(f"Task {task_id} was canceled before node {node_name}.")
 
     def _save_checkpoint(
         self,
@@ -232,6 +247,7 @@ class OpsGraphWorkflow:
         event_map = {
             "started": DiagnosisTaskEventType.graph_node_started,
             "completed": DiagnosisTaskEventType.graph_node_completed,
+            "canceled": DiagnosisTaskEventType.graph_node_canceled,
             "failed": DiagnosisTaskEventType.graph_node_failed,
         }
         event_type = event_map.get(status)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.agents import OpsAgent
+from app.agents import GraphExecutionCancelled, OpsAgent
 from app.schemas import (
     AlertGroupRecord,
     AlertGroupStatus,
@@ -137,7 +137,15 @@ class DiagnosisTaskQueue:
         if original is None:
             raise KeyError(f"Diagnosis task not found: {task_id}")
 
-        if original.status in {DiagnosisTaskStatus.queued, DiagnosisTaskStatus.running} and not force:
+        if (
+            original.status
+            in {
+                DiagnosisTaskStatus.queued,
+                DiagnosisTaskStatus.running,
+                DiagnosisTaskStatus.cancel_requested,
+            }
+            and not force
+        ):
             raise ValueError("Only terminal tasks can be rerun unless force is true.")
 
         existing_rerun = original.trigger_metadata.get("rerun")
@@ -184,16 +192,65 @@ class DiagnosisTaskQueue:
         )
         return new_task
 
+    def cancel(
+        self,
+        task_id: str,
+        requested_by: str = "manual",
+        reason: str | None = None,
+    ) -> DiagnosisTaskRecord:
+        task = self.task_store.get_task(task_id)
+        if task is None:
+            raise KeyError(f"Diagnosis task not found: {task_id}")
+
+        if task.status == DiagnosisTaskStatus.canceled:
+            return task
+        if task.status == DiagnosisTaskStatus.cancel_requested:
+            return task
+        if task.status in {DiagnosisTaskStatus.succeeded, DiagnosisTaskStatus.failed}:
+            raise ValueError("Only queued or running tasks can be canceled.")
+
+        if task.status == DiagnosisTaskStatus.queued:
+            self.task_store.mark_cancel_requested(
+                task_id=task.task_id,
+                requested_by=requested_by,
+                reason=reason,
+            )
+            return self.task_store.mark_canceled(
+                task_id=task.task_id,
+                requested_by=requested_by,
+                reason=reason,
+            )
+
+        return self.task_store.mark_cancel_requested(
+            task_id=task.task_id,
+            requested_by=requested_by,
+            reason=reason,
+        )
+
     def resolve_alert(self, dedupe_key: str) -> AlertGroupRecord | None:
         return self.task_store.resolve_alert_group(dedupe_key)
 
     async def run(self, task_id: str) -> None:
+        queued_task = self.task_store.require_task(task_id)
+        if queued_task.status in {
+            DiagnosisTaskStatus.cancel_requested,
+            DiagnosisTaskStatus.canceled,
+        }:
+            if queued_task.status == DiagnosisTaskStatus.cancel_requested:
+                self.task_store.mark_canceled(task_id, reason="Canceled before execution.")
+            return
+        if queued_task.status != DiagnosisTaskStatus.queued:
+            return
+
         task = self.task_store.mark_running(task_id)
         trigger_metadata = dict(task.trigger_metadata)
         trigger_metadata["task_id"] = task.task_id
         trigger_metadata["task_source"] = task.source
         try:
-            response = await OpsAgent.create_default(incident_store=self.incident_store).analyze(
+            response = await OpsAgent.create_default(
+                incident_store=self.incident_store,
+                should_cancel=self.task_store.is_cancel_requested,
+            ).analyze(
                 question=task.question,
                 session_id=task.session_id,
                 service=task.service,
@@ -201,8 +258,15 @@ class DiagnosisTaskQueue:
                 labels=task.labels,
                 trigger_metadata=trigger_metadata,
             )
+        except GraphExecutionCancelled as exc:
+            self.task_store.mark_canceled(task_id, reason=str(exc))
+            return
         except Exception as exc:
             self.task_store.mark_failed(task_id, str(exc))
+            return
+
+        if self.task_store.is_cancel_requested(task_id):
+            self.task_store.mark_canceled(task_id, reason="Canceled before result persistence.")
             return
 
         self._record_response_events(task_id, response)

@@ -63,10 +63,12 @@ By default, only terminal tasks can be rerun:
 
 - `succeeded`
 - `failed`
+- `canceled`
 
 If a task is still `queued` or `running`, the API returns `409 Conflict`. An
 operator can pass `force=true` when they intentionally want to duplicate an
-active task.
+active task. `cancel_requested` is also treated as active until the runner marks
+the task `canceled`.
 
 ## Harness Connection
 

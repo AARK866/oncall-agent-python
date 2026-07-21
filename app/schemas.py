@@ -33,6 +33,8 @@ class IncidentStatus(str, Enum):
 class DiagnosisTaskStatus(str, Enum):
     queued = "queued"
     running = "running"
+    cancel_requested = "cancel_requested"
+    canceled = "canceled"
     succeeded = "succeeded"
     failed = "failed"
 
@@ -46,8 +48,11 @@ class DiagnosisTaskEventType(str, Enum):
     queued = "queued"
     running = "running"
     rerun_requested = "rerun_requested"
+    cancel_requested = "cancel_requested"
+    canceled = "canceled"
     graph_node_started = "graph_node_started"
     graph_node_completed = "graph_node_completed"
+    graph_node_canceled = "graph_node_canceled"
     graph_node_failed = "graph_node_failed"
     human_review_requested = "human_review_requested"
     human_review_approved = "human_review_approved"
@@ -248,6 +253,11 @@ class DiagnosisTaskRerunRequest(BaseModel):
     requested_by: str = Field(default="manual", min_length=1, max_length=120)
     reason: str | None = Field(default=None, max_length=1000)
     force: bool = False
+
+
+class DiagnosisTaskCancelRequest(BaseModel):
+    requested_by: str = Field(default="manual", min_length=1, max_length=120)
+    reason: str | None = Field(default=None, max_length=1000)
 
 
 class AlertTriggerResponse(BaseModel):

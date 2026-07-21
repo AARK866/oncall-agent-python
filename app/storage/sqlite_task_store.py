@@ -239,6 +239,69 @@ class SQLiteTaskStore:
         )
         return self.require_task(task_id)
 
+    def mark_cancel_requested(
+        self,
+        task_id: str,
+        requested_by: str,
+        reason: str | None = None,
+    ) -> DiagnosisTaskRecord:
+        now = datetime.utcnow()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE diagnosis_tasks
+                SET status = ?, updated_at = ?
+                WHERE task_id = ?
+                """,
+                (
+                    DiagnosisTaskStatus.cancel_requested.value,
+                    _datetime_to_text(now),
+                    task_id,
+                ),
+            )
+        self.append_event(
+            task_id=task_id,
+            event_type=DiagnosisTaskEventType.cancel_requested,
+            message="Diagnosis task cancellation requested.",
+            data={
+                "requested_by": requested_by,
+                "reason": reason,
+            },
+        )
+        return self.require_task(task_id)
+
+    def mark_canceled(
+        self,
+        task_id: str,
+        requested_by: str = "system",
+        reason: str | None = None,
+    ) -> DiagnosisTaskRecord:
+        now = datetime.utcnow()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE diagnosis_tasks
+                SET status = ?, updated_at = ?, finished_at = ?
+                WHERE task_id = ?
+                """,
+                (
+                    DiagnosisTaskStatus.canceled.value,
+                    _datetime_to_text(now),
+                    _datetime_to_text(now),
+                    task_id,
+                ),
+            )
+        self.append_event(
+            task_id=task_id,
+            event_type=DiagnosisTaskEventType.canceled,
+            message="Diagnosis task canceled.",
+            data={
+                "requested_by": requested_by,
+                "reason": reason,
+            },
+        )
+        return self.require_task(task_id)
+
     def mark_succeeded(self, task_id: str, response: ChatResponse) -> DiagnosisTaskRecord:
         now = datetime.utcnow()
         with self._connect() as connection:
@@ -515,6 +578,17 @@ class SQLiteTaskStore:
         if task is None:
             raise KeyError(f"Diagnosis task not found: {task_id}")
         return task
+
+    def is_cancel_requested(self, task_id: str) -> bool:
+        task = self.get_task(task_id)
+        return bool(
+            task
+            and task.status
+            in {
+                DiagnosisTaskStatus.cancel_requested,
+                DiagnosisTaskStatus.canceled,
+            }
+        )
 
     def list_tasks(self, limit: int = 20) -> list[DiagnosisTaskRecord]:
         with self._connect() as connection:

@@ -41,3 +41,4 @@ Docs:
 - Human review: `docs/human-review.md`
 - Retry policy: `docs/retry-policy.md`
 - Task rerun: `docs/task-rerun.md`
+- Task cancellation: `docs/task-cancellation.md`

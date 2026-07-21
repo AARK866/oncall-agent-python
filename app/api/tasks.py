@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from app.schemas import (
+    DiagnosisTaskCancelRequest,
     DiagnosisTaskEventRecord,
     DiagnosisTaskRecord,
     DiagnosisTaskRerunRequest,
@@ -47,6 +48,28 @@ async def rerun_task(
 
     background_tasks.add_task(queue.run, task.task_id)
     return task
+
+
+@router.post(
+    "/{task_id}/cancel",
+    response_model=DiagnosisTaskRecord,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_task(
+    task_id: str,
+    request: DiagnosisTaskCancelRequest,
+) -> DiagnosisTaskRecord:
+    queue = _queue()
+    try:
+        return queue.cancel(
+            task_id=task_id,
+            requested_by=request.requested_by,
+            reason=request.reason,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Task not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.get("/{task_id}", response_model=DiagnosisTaskRecord)
