@@ -191,6 +191,7 @@ class DiagnosisTaskQueue:
                     "summary": detail,
                     "error": result.get("error"),
                     "elapsed_ms": result.get("elapsed_ms"),
+                    "retry": data.get("_retry"),
                 },
             )
 

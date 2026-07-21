@@ -1,13 +1,20 @@
 from time import perf_counter
 
+from app.reliability import RetryError, RetryPolicy, run_with_retry
 from app.schemas import ToolCall, ToolResult
 from app.tools.base import BaseTool
 
 
 class ToolRegistry:
-    def __init__(self, connector_name: str = "manual", mode: str = "manual") -> None:
+    def __init__(
+        self,
+        connector_name: str = "manual",
+        mode: str = "manual",
+        retry_policy: RetryPolicy | None = None,
+    ) -> None:
         self.connector_name = connector_name
         self.mode = mode
+        self.retry_policy = retry_policy or RetryPolicy.from_settings()
         self._tools: dict[str, BaseTool] = {}
 
     def register(self, tool: BaseTool) -> None:
@@ -45,20 +52,34 @@ class ToolRegistry:
 
         started_at = perf_counter()
         try:
-            data = await tool.run(tool_call.arguments)
+            outcome = await run_with_retry(
+                operation=lambda: tool.run(tool_call.arguments),
+                policy=self.retry_policy,
+            )
+            data = self._with_retry_metadata(outcome.value, outcome.metadata())
             return ToolResult(
                 tool_name=tool_call.name,
                 success=True,
                 data=data,
                 elapsed_ms=self._elapsed_ms(started_at),
             )
-        except Exception as exc:
+        except RetryError as exc:
             return ToolResult(
                 tool_name=tool_call.name,
                 success=False,
-                error=str(exc),
+                data={"_retry": exc.metadata()},
+                error=str(exc.last_error),
                 elapsed_ms=self._elapsed_ms(started_at),
             )
 
     def _elapsed_ms(self, started_at: float) -> int:
         return int((perf_counter() - started_at) * 1000)
+
+    def _with_retry_metadata(
+        self,
+        data: dict,
+        metadata: dict[str, object],
+    ) -> dict:
+        if int(metadata.get("attempts", 1)) <= 1:
+            return data
+        return {**data, "_retry": metadata}
