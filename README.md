@@ -37,3 +37,4 @@ Docs:
 - Alert deduplication: `docs/alert-dedup.md`
 - Project acceptance: `docs/project-acceptance.md`
 - LangGraph reliability: `docs/langgraph-reliability.md`
+- Error recovery: `docs/error-recovery.md`

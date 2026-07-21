@@ -77,9 +77,27 @@ class KnowledgeBase:
         if mode == "keyword":
             return self._keyword_search(built_query, top_k, metadata_filter or None)
         if mode == "vector":
-            return self._vector_search(built_query, top_k, metadata_filter or None)
+            try:
+                return self._vector_search(built_query, top_k, metadata_filter or None)
+            except Exception as exc:
+                return self._fallback_keyword_search(
+                    query=built_query,
+                    top_k=top_k,
+                    metadata_filter=metadata_filter or None,
+                    fallback_from="vector",
+                    error=exc,
+                )
         if mode == "hybrid":
-            return self._hybrid_search(built_query, top_k, metadata_filter or None)
+            try:
+                return self._hybrid_search(built_query, top_k, metadata_filter or None)
+            except Exception as exc:
+                return self._fallback_keyword_search(
+                    query=built_query,
+                    top_k=top_k,
+                    metadata_filter=metadata_filter or None,
+                    fallback_from="hybrid",
+                    error=exc,
+                )
 
         raise ValueError(f"Unsupported KNOWLEDGE_RETRIEVER_MODE: {self.retriever_mode}")
 
@@ -190,6 +208,25 @@ class KnowledgeBase:
             reverse=True,
         )[:top_k]
 
+    def _fallback_keyword_search(
+        self,
+        query: str,
+        top_k: int,
+        metadata_filter: dict[str, Any] | None,
+        fallback_from: str,
+        error: Exception,
+    ) -> list[SourceDocument]:
+        results = self._keyword_search(query, top_k, metadata_filter)
+        return [
+            _with_recovery_metadata(
+                result,
+                fallback_from=fallback_from,
+                fallback_to="keyword",
+                error=error,
+            )
+            for result in results
+        ]
+
 
 def enrich_documents_metadata(documents: list[RawDocument]) -> list[RawDocument]:
     return [enrich_document_metadata(document) for document in documents]
@@ -255,3 +292,26 @@ def _collect_metadata_values(documents: list[RawDocument], key: str) -> list[str
 
 def _with_retriever(source: SourceDocument, retriever: str) -> SourceDocument:
     return source.model_copy(update={"metadata": {**source.metadata, "retriever": retriever}})
+
+
+def _with_recovery_metadata(
+    source: SourceDocument,
+    fallback_from: str,
+    fallback_to: str,
+    error: Exception,
+) -> SourceDocument:
+    return source.model_copy(
+        update={
+            "metadata": {
+                **source.metadata,
+                "retriever": fallback_to,
+                "recovery": {
+                    "used": True,
+                    "fallback_from": fallback_from,
+                    "fallback_to": fallback_to,
+                    "error_type": type(error).__name__,
+                    "error": str(error)[:500],
+                },
+            }
+        }
+    )

@@ -7,7 +7,7 @@ from app.schemas import ChatMessage, ChatMode, ChatResponse, MessageRole, Source
 
 
 class KnowledgeAgent:
-    """Agent that answers questions with local knowledge-base context."""
+    """Agent that answers questions with knowledge-base context."""
 
     def __init__(self, knowledge_base: KnowledgeBase, llm: LLMClient | None = None) -> None:
         self.knowledge_base = knowledge_base
@@ -43,22 +43,38 @@ class KnowledgeAgent:
         if not sources:
             return ChatResponse(
                 session_id=session_id,
-                answer="知识库中暂未找到相关内容。请补充服务名、告警现象或时间范围后再试。",
+                answer=(
+                    "No relevant runbook content was found. Please add a service name, "
+                    "alert symptom, or time window and try again."
+                ),
                 mode=ChatMode.knowledge,
                 sources=[],
                 metadata={"retrieved_count": 0, "knowledge_base": self.knowledge_base.stats()},
             )
 
+        metadata = {
+            "retrieved_count": len(sources),
+            "knowledge_base": self.knowledge_base.stats(),
+            **self._recovery_metadata(sources),
+        }
         messages = self._build_messages(question=question, sources=sources)
-        draft_answer = await self.llm.generate(messages)
-        answer = self._format_answer(draft_answer=draft_answer, sources=sources)
+        try:
+            draft_answer = await self.llm.generate(messages)
+        except Exception as exc:
+            draft_answer = self._fallback_answer(question=question, sources=sources, error=exc)
+            metadata["llm_fallback"] = {
+                "used": True,
+                "reason": "llm_error",
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:500],
+            }
 
         return ChatResponse(
             session_id=session_id,
-            answer=answer,
+            answer=self._format_answer(draft_answer=draft_answer, sources=sources),
             mode=ChatMode.knowledge,
             sources=sources,
-            metadata={"retrieved_count": len(sources), "knowledge_base": self.knowledge_base.stats()},
+            metadata=metadata,
         )
 
     def search(
@@ -79,28 +95,63 @@ class KnowledgeAgent:
 
     def _build_messages(self, question: str, sources: Sequence[SourceDocument]) -> list[ChatMessage]:
         context = "\n\n".join(
-            f"来源：{source.title}\n内容：{source.content}" for source in sources
+            f"Source: {source.title}\nContent: {source.content}" for source in sources
         )
         return [
             ChatMessage(
                 role=MessageRole.system,
                 content=(
-                    "你是企业 OnCall 知识库助手。请只基于给定知识库内容回答，"
-                    "无法确认的信息要明确说明。"
+                    "You are an enterprise OnCall knowledge-base assistant. "
+                    "Answer only from the provided runbook context. "
+                    "If the context is insufficient, say what is missing."
                 ),
             ),
             ChatMessage(
                 role=MessageRole.user,
-                content=f"问题：{question}\n\n知识库内容：\n{context}",
+                content=f"Question: {question}\n\nRunbook context:\n{context}",
             ),
         ]
 
     def _format_answer(self, draft_answer: str, sources: Sequence[SourceDocument]) -> str:
         source_lines = [
-            f"- {source.title}（score={source.score}）" for source in sources
+            f"- {source.title} (score={source.score})" for source in sources
         ]
         return (
             f"{draft_answer}\n\n"
-            "参考来源：\n"
+            "References:\n"
             f"{chr(10).join(source_lines)}"
         )
+
+    def _fallback_answer(
+        self,
+        question: str,
+        sources: Sequence[SourceDocument],
+        error: Exception,
+    ) -> str:
+        snippets = []
+        for source in sources[:3]:
+            content = " ".join(source.content.split())
+            snippets.append(f"- {source.title}: {content[:240]}")
+
+        return (
+            "The LLM call failed, so this fallback answer is built from retrieved runbook snippets.\n\n"
+            f"Question: {question}\n\n"
+            "Suggested next steps:\n"
+            f"{chr(10).join(snippets)}\n\n"
+            f"Fallback reason: {type(error).__name__}"
+        )
+
+    def _recovery_metadata(self, sources: Sequence[SourceDocument]) -> dict:
+        recoveries = [
+            source.metadata.get("recovery")
+            for source in sources
+            if isinstance(source.metadata.get("recovery"), dict)
+        ]
+        if not recoveries:
+            return {}
+        return {
+            "retrieval_fallback": {
+                "used": True,
+                "recoveries": recoveries,
+            }
+        }
