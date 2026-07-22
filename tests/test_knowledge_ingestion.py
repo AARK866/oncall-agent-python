@@ -97,10 +97,11 @@ def test_knowledge_ingestion_can_prepare_llamaindex_shapes(
         encoding="utf-8",
     )
 
+    pipeline = CapturingKnowledgeIngestionPipeline(
+        embedding_model=HashEmbeddingModel(dimensions=16),
+    )
     result = _run_async(
-        KnowledgeIngestionPipeline(
-            embedding_model=HashEmbeddingModel(dimensions=16),
-        ).ingest(
+        pipeline.ingest(
             source=KnowledgeIngestSource.local,
             path=str(runbook_dir),
             chunk_size=200,
@@ -110,8 +111,23 @@ def test_knowledge_ingestion_can_prepare_llamaindex_shapes(
 
     assert result.metadata["knowledge_engine"] == "llamaindex"
     assert result.metadata["llamaindex"]["engine"] == "llamaindex"
+    assert result.metadata["llamaindex"]["pipeline"] == "document-node-store"
     assert result.metadata["llamaindex"]["documents_prepared"] == 1
     assert result.metadata["llamaindex"]["nodes_prepared"] == result.chunks_created
+    assert result.metadata["llamaindex"]["chunks_normalized"] == result.chunks_created
+    assert pipeline.stored_chunks
+    assert pipeline.stored_chunks[0].metadata["knowledge_engine"] == "llamaindex"
+    assert pipeline.stored_chunks[0].metadata["doc_id"] == "payment.md"
+
+
+class CapturingKnowledgeIngestionPipeline(KnowledgeIngestionPipeline):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.stored_chunks = []
+
+    def _upsert_chunks(self, chunks):
+        self.stored_chunks = chunks
+        return {"store": "capture", "persisted": False}
 
 
 class FakeGitHubClient:

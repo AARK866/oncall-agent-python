@@ -40,7 +40,7 @@ class KnowledgeIngestionPipeline:
             chunk_size=chunk_size or settings.knowledge_ingest_chunk_size,
             chunk_overlap=chunk_overlap if chunk_overlap is not None else settings.knowledge_ingest_chunk_overlap,
         )
-        engine_metadata = self._engine_metadata(documents, chunks)
+        chunks, engine_metadata = self._prepare_for_engine(documents, chunks)
         store_metadata = self._upsert_chunks(chunks)
 
         return KnowledgeIngestResponse(
@@ -77,27 +77,31 @@ class KnowledgeIngestionPipeline:
 
         raise ValueError(f"Unsupported knowledge source: {source}")
 
-    def _engine_metadata(
+    def _prepare_for_engine(
         self,
         documents: list[RawDocument],
         chunks: list[DocumentChunk],
-    ) -> dict[str, Any]:
+    ) -> tuple[list[DocumentChunk], dict[str, Any]]:
         engine = settings.knowledge_engine.strip().lower()
         if engine in {"local", "", "default"}:
-            return {"knowledge_engine": "local"}
+            return chunks, {"knowledge_engine": "local"}
 
         if engine == "llamaindex":
             adapter = create_llamaindex_adapter()
-            llama_documents = adapter.documents_from_raw(documents)
-            llama_nodes = adapter.nodes_from_chunks(chunks)
-            return {
-                "knowledge_engine": "llamaindex",
-                "llamaindex": {
-                    **adapter.describe(),
-                    "documents_prepared": len(llama_documents),
-                    "nodes_prepared": len(llama_nodes),
+            batch = adapter.prepare_ingestion(documents, chunks)
+            return (
+                batch.chunks,
+                {
+                    "knowledge_engine": "llamaindex",
+                    "llamaindex": {
+                        **adapter.describe(),
+                        "pipeline": "document-node-store",
+                        "documents_prepared": len(batch.documents),
+                        "nodes_prepared": len(batch.nodes),
+                        "chunks_normalized": len(batch.chunks),
+                    },
                 },
-            }
+            )
 
         raise ValueError(f"Unsupported KNOWLEDGE_ENGINE: {settings.knowledge_engine}")
 

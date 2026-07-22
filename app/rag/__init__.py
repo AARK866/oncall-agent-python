@@ -5,6 +5,7 @@ from app.rag.knowledge_base import KnowledgeBase
 from app.rag.llamaindex_adapter import (
     LlamaIndexAdapter,
     LlamaIndexDocumentSnapshot,
+    LlamaIndexIngestionBatch,
     LlamaIndexNodeSnapshot,
     create_llamaindex_adapter,
     is_llamaindex_available,
@@ -23,6 +24,7 @@ __all__ = [
     "LangChainEmbeddingModel",
     "LlamaIndexAdapter",
     "LlamaIndexDocumentSnapshot",
+    "LlamaIndexIngestionBatch",
     "LlamaIndexNodeSnapshot",
     "LocalKnowledgeBase",
     "MilvusVectorStore",

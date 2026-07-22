@@ -53,3 +53,26 @@ def test_llamaindex_adapter_converts_chunk_to_source_document() -> None:
 
     if isinstance(node, LlamaIndexNodeSnapshot):
         assert node.text == chunk.content
+
+
+def test_llamaindex_adapter_normalizes_nodes_back_to_store_chunks() -> None:
+    adapter = create_llamaindex_adapter()
+    chunk = DocumentChunk(
+        chunk_id="payment.md#chunk-0",
+        doc_id="payment.md",
+        title="Payment Runbook",
+        content="Rollback payment-api after checking the error rate.",
+        source="github://example/oncall/payment.md",
+        metadata={"services": ["payment-api"], "chunk_index": 0},
+    )
+
+    batch = adapter.prepare_ingestion([], [chunk])
+
+    assert len(batch.nodes) == 1
+    assert len(batch.chunks) == 1
+    normalized = batch.chunks[0]
+    assert normalized.chunk_id == chunk.chunk_id
+    assert normalized.doc_id == chunk.doc_id
+    assert normalized.content == chunk.content
+    assert normalized.metadata["services"] == ["payment-api"]
+    assert normalized.metadata["knowledge_engine"] == "llamaindex"

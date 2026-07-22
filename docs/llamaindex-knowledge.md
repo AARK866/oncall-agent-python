@@ -12,8 +12,8 @@ KNOWLEDGE_ENGINE=local
 Supported values:
 
 - `local`: current project-native RAG flow;
-- `llamaindex`: prepare LlamaIndex-compatible documents and nodes during
-  ingestion while keeping the existing vector store write path.
+- `llamaindex`: pass ingestion data through LlamaIndex-compatible documents
+  and nodes before writing normalized chunks to the configured vector store.
 
 ## What Changed
 
@@ -29,6 +29,22 @@ If `llama-index-core` is not installed, the adapter returns lightweight snapshot
 objects with the same fields this project needs. That keeps tests and local
 development stable while the project migrates in small steps.
 
+## Ingestion Flow
+
+```text
+RawDocument
+  -> metadata enrichment
+  -> project chunking
+  -> LlamaIndex Document + TextNode
+  -> normalized DocumentChunk
+  -> embedding
+  -> in-memory store or Milvus
+```
+
+The node metadata carries stable `chunk_id`, `doc_id`, `title`, `source`, and
+`knowledge_engine` fields. As a result, the data that reaches the vector store
+can be traced back to both the source document and the ingestion engine.
+
 ## Why This Matters
 
 LlamaIndex is built around document and node abstractions. A node is a retrievable
@@ -43,16 +59,18 @@ nodes. This matches the project's enterprise needs:
 
 ## Current Boundary
 
-This step does not replace `KnowledgeBase.search()` yet.
+The write path now goes through the LlamaIndex adapter when
+`KNOWLEDGE_ENGINE=llamaindex`. Retrieval still uses the project's current
+keyword, vector, and hybrid implementations.
 
-The next LlamaIndex step should move ingestion onto this adapter more deeply:
+The next LlamaIndex step should introduce a retriever adapter:
 
 ```text
-load documents
-  -> enrich metadata
-  -> create LlamaIndex documents/nodes
-  -> write nodes to current vector store
-  -> keep /api/knowledge/ingest compatible
+query
+  -> current retrieval contract
+  -> LlamaIndex retriever
+  -> SourceDocument
+  -> existing Agent context
 ```
 
 Reference: LlamaIndex documents `Document` and `Node` as its core loading

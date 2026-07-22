@@ -27,6 +27,15 @@ class LlamaIndexNodeSnapshot:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class LlamaIndexIngestionBatch:
+    """Prepared LlamaIndex objects plus chunks normalized from their nodes."""
+
+    documents: list[Any]
+    nodes: list[Any]
+    chunks: list[DocumentChunk]
+
+
 class LlamaIndexAdapter:
     """Bridge between project RAG models and LlamaIndex document/node shapes."""
 
@@ -44,6 +53,19 @@ class LlamaIndexAdapter:
             "document_class": _class_name(self._document_cls),
             "node_class": _class_name(self._text_node_cls),
         }
+
+    def prepare_ingestion(
+        self,
+        documents: list[RawDocument],
+        chunks: list[DocumentChunk],
+    ) -> LlamaIndexIngestionBatch:
+        llama_documents = self.documents_from_raw(documents)
+        llama_nodes = self.nodes_from_chunks(chunks)
+        return LlamaIndexIngestionBatch(
+            documents=llama_documents,
+            nodes=llama_nodes,
+            chunks=self.chunks_from_nodes(llama_nodes),
+        )
 
     def documents_from_raw(self, documents: list[RawDocument]) -> list[Any]:
         return [self.document_from_raw(document) for document in documents]
@@ -78,6 +100,7 @@ class LlamaIndexAdapter:
             "doc_id": chunk.doc_id,
             "title": chunk.title,
             "source": chunk.source,
+            "knowledge_engine": "llamaindex",
         }
         if self._text_node_cls is None:
             return LlamaIndexNodeSnapshot(
@@ -89,6 +112,21 @@ class LlamaIndexAdapter:
         return self._text_node_cls(
             id_=chunk.chunk_id,
             text=chunk.content,
+            metadata=metadata,
+        )
+
+    def chunks_from_nodes(self, nodes: list[Any]) -> list[DocumentChunk]:
+        return [self.chunk_from_node(node) for node in nodes]
+
+    def chunk_from_node(self, node: Any) -> DocumentChunk:
+        metadata = _node_metadata(node)
+        node_id = _node_id(node, metadata)
+        return DocumentChunk(
+            chunk_id=str(metadata.get("chunk_id") or node_id),
+            doc_id=str(metadata.get("doc_id") or node_id),
+            title=str(metadata.get("title") or node_id),
+            content=_node_text(node),
+            source=str(metadata.get("source") or ""),
             metadata=metadata,
         )
 
