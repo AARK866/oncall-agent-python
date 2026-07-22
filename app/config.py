@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     knowledge_github_path: str = "app/data/runbooks"
     knowledge_ingest_chunk_size: int = 800
     knowledge_ingest_chunk_overlap: int = 120
+    knowledge_allowed_extensions: str = ".md,.txt,.pdf,.docx"
+    knowledge_default_access_scope: str = "internal"
+    knowledge_default_allowed_roles: str = "oncall,sre"
     milvus_uri: str | None = None
     milvus_token: str | None = None
     milvus_db_name: str | None = None

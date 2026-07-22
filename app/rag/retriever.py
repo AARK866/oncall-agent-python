@@ -2,7 +2,7 @@ import math
 from typing import Any
 from pathlib import Path
 
-from app.rag.document_loader import load_markdown_documents
+from app.rag.document_loader import load_enterprise_documents
 from app.rag.filters import matches_metadata
 from app.rag.splitter import DocumentChunk, split_documents
 from app.rag.text_features import tokenize_text
@@ -23,7 +23,7 @@ class LocalKnowledgeBase:
         chunk_size: int = 800,
         chunk_overlap: int = 120,
     ) -> "LocalKnowledgeBase":
-        documents = load_markdown_documents(directory)
+        documents = load_enterprise_documents(directory)
         chunks = split_documents(documents, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         return cls(chunks=chunks)
 
@@ -68,4 +68,3 @@ def _score(query_tokens: set[str], document_tokens: set[str]) -> float:
     if not overlap:
         return 0.0
     return len(overlap) / math.sqrt(len(query_tokens) * len(document_tokens))
-

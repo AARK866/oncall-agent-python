@@ -108,8 +108,9 @@ evaluation questions + expected sources
   -> detect quality regressions
 ```
 
-The next LlamaIndex step should expand document ingestion with file-type-aware
-readers and richer metadata extraction.
+File-type-aware ingestion now supports Markdown, text, PDF, Word, and GitHub
+documents with a unified governance metadata contract. The next LlamaIndex step
+should enforce access-control metadata during retrieval.
 
 Reference: LlamaIndex documents `Document` and `Node` as its core loading
 abstractions, where nodes are retrievable chunks with metadata inherited from

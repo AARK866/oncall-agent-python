@@ -1,8 +1,15 @@
+import base64
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 from app.config import settings
-from app.rag.document_loader import RawDocument, load_markdown_documents
+from app.rag.document_loader import (
+    RawDocument,
+    load_enterprise_documents,
+    load_file_document,
+    normalize_extensions,
+)
 from app.rag.embeddings import create_embedding_model
 from app.rag.knowledge_base import enrich_documents_metadata
 from app.rag.llamaindex_adapter import create_llamaindex_adapter
@@ -58,6 +65,7 @@ class KnowledgeIngestionPipeline:
                 "embedding_provider": settings.embedding_provider,
                 "embedding_model": settings.embedding_model,
                 "embedding_dimensions": settings.embedding_dimensions,
+                "documents": _document_metadata_summary(documents),
             },
         )
 
@@ -67,10 +75,12 @@ class KnowledgeIngestionPipeline:
         path: str,
     ) -> list[RawDocument]:
         if source == KnowledgeIngestSource.local:
-            return [
-                _with_source_metadata(document, source="local")
-                for document in load_markdown_documents(path)
-            ]
+            return load_enterprise_documents(
+                path,
+                allowed_extensions=_allowed_extensions(),
+                access_scope=settings.knowledge_default_access_scope,
+                allowed_roles=_allowed_roles(),
+            )
 
         if source == KnowledgeIngestSource.github:
             return await self._load_github_documents(path)
@@ -107,10 +117,10 @@ class KnowledgeIngestionPipeline:
 
     async def _load_github_documents(self, path: str) -> list[RawDocument]:
         documents: list[RawDocument] = []
-        await self._collect_github_markdown(path.strip("/"), root_path=path.strip("/"), documents=documents)
+        await self._collect_github_documents(path.strip("/"), root_path=path.strip("/"), documents=documents)
         return documents
 
-    async def _collect_github_markdown(
+    async def _collect_github_documents(
         self,
         path: str,
         root_path: str,
@@ -121,33 +131,45 @@ class KnowledgeIngestionPipeline:
             for entry in data.get("entries", []):
                 entry_path = str(entry.get("path") or "")
                 if entry.get("type") in {"dir", "directory"}:
-                    await self._collect_github_markdown(entry_path, root_path=root_path, documents=documents)
-                elif entry_path.endswith(".md"):
-                    await self._collect_github_markdown(entry_path, root_path=root_path, documents=documents)
+                    await self._collect_github_documents(entry_path, root_path=root_path, documents=documents)
+                elif Path(entry_path).suffix.lower() in _allowed_extensions():
+                    await self._collect_github_documents(entry_path, root_path=root_path, documents=documents)
             return
 
         if data.get("type") != "file":
             return
-        if not str(data.get("path") or path).endswith(".md"):
+        github_path = str(data.get("path") or path)
+        suffix = Path(github_path).suffix.lower()
+        if suffix not in _allowed_extensions():
             return
 
-        content = str(data.get("content") or "")
-        doc_id = _relative_doc_id(str(data.get("path") or path), root_path)
-        documents.append(
-            RawDocument(
-                doc_id=doc_id,
-                title=_extract_title(content) or Path(doc_id).stem,
-                content=content,
-                source=f"github://{self.github_client.repo}/{data.get('path')}",
-                metadata={
-                    "path": doc_id,
-                    "github_repo": self.github_client.repo,
-                    "github_branch": data.get("ref") or self.github_client.branch,
-                    "github_sha": data.get("sha"),
-                    "source_type": "github",
-                },
+        doc_id = _relative_doc_id(github_path, root_path)
+        source_uri = f"github://{self.github_client.repo}/{github_path}"
+        content_bytes = _github_content_bytes(data)
+        with NamedTemporaryFile(suffix=suffix, delete=False) as temporary_file:
+            temporary_file.write(content_bytes)
+            temporary_path = Path(temporary_file.name)
+
+        try:
+            documents.append(
+                load_file_document(
+                    temporary_path,
+                    doc_id=doc_id,
+                    source=source_uri,
+                    source_type="github",
+                    source_version=str(data.get("sha") or "") or None,
+                    updated_at=data.get("updated_at"),
+                    access_scope=settings.knowledge_default_access_scope,
+                    allowed_roles=_allowed_roles(),
+                    extra_metadata={
+                        "github_repo": self.github_client.repo,
+                        "github_branch": data.get("ref") or self.github_client.branch,
+                        "github_sha": data.get("sha"),
+                    },
+                )
             )
-        )
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
     def _upsert_chunks(self, chunks: list[DocumentChunk]) -> dict[str, Any]:
         store_mode = settings.knowledge_vector_store.lower().strip()
@@ -183,24 +205,40 @@ def _default_path(source: KnowledgeIngestSource) -> str:
 def _relative_doc_id(path: str, root_path: str) -> str:
     normalized_path = path.strip("/")
     normalized_root = root_path.strip("/")
+    if normalized_path == normalized_root:
+        return Path(normalized_path).name
     if normalized_root and normalized_path.startswith(f"{normalized_root}/"):
         return normalized_path[len(normalized_root) + 1 :]
     return normalized_path
 
 
-def _with_source_metadata(document: RawDocument, source: str) -> RawDocument:
-    return RawDocument(
-        doc_id=document.doc_id,
-        title=document.title,
-        content=document.content,
-        source=document.source,
-        metadata={**document.metadata, "source_type": source},
-    )
+def _allowed_extensions() -> set[str]:
+    return normalize_extensions(settings.knowledge_allowed_extensions.split(","))
 
 
-def _extract_title(content: str) -> str | None:
-    for line in content.splitlines():
-        line = line.strip()
-        if line.startswith("# "):
-            return line.removeprefix("# ").strip()
-    return None
+def _allowed_roles() -> list[str]:
+    return [role.strip() for role in settings.knowledge_default_allowed_roles.split(",") if role.strip()]
+
+
+def _github_content_bytes(data: dict[str, Any]) -> bytes:
+    encoded = data.get("content_base64")
+    if isinstance(encoded, str) and encoded:
+        return base64.b64decode(encoded)
+    return str(data.get("content") or "").encode("utf-8")
+
+
+def _document_metadata_summary(documents: list[RawDocument]) -> dict[str, Any]:
+    formats: dict[str, int] = {}
+    access_scopes: set[str] = set()
+    roles: set[str] = set()
+    for document in documents:
+        file_type = str(document.metadata.get("file_type") or "unknown")
+        formats[file_type] = formats.get(file_type, 0) + 1
+        if document.metadata.get("access_scope"):
+            access_scopes.add(str(document.metadata["access_scope"]))
+        roles.update(str(role) for role in document.metadata.get("allowed_roles", []))
+    return {
+        "formats": formats,
+        "access_scopes": sorted(access_scopes),
+        "allowed_roles": sorted(roles),
+    }

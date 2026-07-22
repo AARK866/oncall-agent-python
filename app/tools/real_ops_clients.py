@@ -167,6 +167,7 @@ class GitHubClient:
             "size": data.get("size"),
             "encoding": encoding,
             "content": decoded_content,
+            "content_base64": content if encoding == "base64" else None,
         }
 
     async def _get_json(self, path: str, params: dict[str, Any]) -> Any:

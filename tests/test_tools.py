@@ -181,4 +181,5 @@ def test_github_client_reads_repository_file() -> None:
     data = asyncio.run(client.get_file("app/main.py"))
 
     assert data["content"] == "print('hello')"
+    assert data["content_base64"] == encoded
     assert data["path"] == "app/main.py"

@@ -1,6 +1,10 @@
+import base64
+from io import BytesIO
 from typing import Any
 
 from fastapi.testclient import TestClient
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from app.config import settings
 from app.main import app
@@ -40,11 +44,12 @@ def test_local_knowledge_ingestion_pipeline_loads_and_chunks_markdown(tmp_path) 
 
 def test_github_knowledge_ingestion_pipeline_loads_markdown_recursively() -> None:
     fake_github = FakeGitHubClient()
+    pipeline = CapturingKnowledgeIngestionPipeline(
+        embedding_model=HashEmbeddingModel(dimensions=16),
+        github_client=fake_github,
+    )
     result = _run_async(
-        KnowledgeIngestionPipeline(
-            embedding_model=HashEmbeddingModel(dimensions=16),
-            github_client=fake_github,
-        ).ingest(
+        pipeline.ingest(
             source=KnowledgeIngestSource.github,
             path="docs/runbooks",
             chunk_size=200,
@@ -57,6 +62,9 @@ def test_github_knowledge_ingestion_pipeline_loads_markdown_recursively() -> Non
     assert result.documents_loaded == 2
     assert result.document_ids == ["payment.md", "nested/order.md"]
     assert result.metadata["persisted"] is False
+    assert result.metadata["documents"]["formats"] == {"md": 2}
+    assert pipeline.stored_chunks[0].metadata["source_version"]
+    assert pipeline.stored_chunks[0].metadata["allowed_roles"] == ["oncall", "sre"]
 
 
 def test_knowledge_ingest_api_accepts_local_path(tmp_path) -> None:
@@ -120,6 +128,29 @@ def test_knowledge_ingestion_can_prepare_llamaindex_shapes(
     assert pipeline.stored_chunks[0].metadata["doc_id"] == "payment.md"
 
 
+def test_github_knowledge_ingestion_decodes_and_parses_pdf() -> None:
+    pipeline = CapturingKnowledgeIngestionPipeline(
+        embedding_model=HashEmbeddingModel(dimensions=16),
+        github_client=FakeGitHubPdfClient(),
+    )
+
+    result = _run_async(
+        pipeline.ingest(
+            source=KnowledgeIngestSource.github,
+            path="docs/payment.pdf",
+            chunk_size=200,
+            chunk_overlap=20,
+        )
+    )
+
+    assert result.document_ids == ["payment.pdf"]
+    assert result.metadata["documents"]["formats"] == {"pdf": 1}
+    assert pipeline.stored_chunks
+    assert "GitHub PDF recovery" in pipeline.stored_chunks[0].content
+    assert pipeline.stored_chunks[0].metadata["source_version"] == "pdf-sha"
+    assert pipeline.stored_chunks[0].metadata["source_uri"].endswith("/docs/payment.pdf")
+
+
 class CapturingKnowledgeIngestionPipeline(KnowledgeIngestionPipeline):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -141,7 +172,7 @@ class FakeGitHubClient:
                 "entries": [
                     {"path": "docs/runbooks/payment.md", "type": "file"},
                     {"path": "docs/runbooks/nested", "type": "dir"},
-                    {"path": "docs/runbooks/ignore.txt", "type": "file"},
+                    {"path": "docs/runbooks/ignore.json", "type": "file"},
                 ],
             }
         if path == "docs/runbooks/nested":
@@ -157,6 +188,7 @@ class FakeGitHubClient:
                 "path": path,
                 "ref": ref or self.branch,
                 "sha": "sha-payment",
+                "content_base64": None,
                 "content": "# Payment Runbook\n\nPayment 5xx database recovery.",
             }
         if path == "docs/runbooks/nested/order.md":
@@ -165,9 +197,51 @@ class FakeGitHubClient:
                 "path": path,
                 "ref": ref or self.branch,
                 "sha": "sha-order",
+                "content_base64": None,
                 "content": "# Order Runbook\n\nOrder timeout recovery.",
             }
         raise AssertionError(f"Unexpected GitHub path: {path}")
+
+
+class FakeGitHubPdfClient:
+    repo = "example/oncall"
+    branch = "main"
+
+    async def get_file(self, path: str, ref: str | None = None) -> dict[str, Any]:
+        assert path == "docs/payment.pdf"
+        return {
+            "type": "file",
+            "path": path,
+            "ref": ref or self.branch,
+            "sha": "pdf-sha",
+            "content": "",
+            "content_base64": base64.b64encode(_pdf_bytes("GitHub PDF recovery")).decode("ascii"),
+        }
+
+
+def _pdf_bytes(text: str) -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    page[NameObject("/Resources")] = DictionaryObject(
+        {
+            NameObject("/Font"): DictionaryObject(
+                {NameObject("/F1"): writer._add_object(font)}
+            )
+        }
+    )
+    stream = DecodedStreamObject()
+    stream.set_data(f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode("ascii"))
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 def _run_async(awaitable):

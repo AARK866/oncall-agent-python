@@ -1,4 +1,9 @@
-from app.rag.document_loader import RawDocument, load_markdown_documents
+from app.rag.document_loader import (
+    RawDocument,
+    load_enterprise_documents,
+    load_file_document,
+    load_markdown_documents,
+)
 from app.rag.embeddings import HashEmbeddingModel, LangChainEmbeddingModel, create_embedding_model
 from app.rag.evaluation import RagRetrievalEvaluator, RetrievalEvaluationCase, RetrievalEvaluationReport
 from app.rag.ingestion import KnowledgeIngestionPipeline
@@ -41,5 +46,7 @@ __all__ = [
     "create_embedding_model",
     "is_llamaindex_available",
     "load_markdown_documents",
+    "load_enterprise_documents",
+    "load_file_document",
     "split_documents",
 ]

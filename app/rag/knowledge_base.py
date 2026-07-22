@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
-from app.rag.document_loader import RawDocument, load_markdown_documents
+from app.rag.document_loader import RawDocument, load_enterprise_documents
 from app.rag.embeddings import create_embedding_model
 from app.rag.llamaindex_adapter import create_llamaindex_adapter
 from app.rag.llamaindex_retriever import LlamaIndexRetrieverAdapter
@@ -52,7 +52,12 @@ class KnowledgeBase:
         chunk_overlap: int = 120,
         retriever_mode: str | None = None,
     ) -> "KnowledgeBase":
-        raw_documents = load_markdown_documents(directory)
+        raw_documents = load_enterprise_documents(
+            directory,
+            allowed_extensions=settings.knowledge_allowed_extensions.split(","),
+            access_scope=settings.knowledge_default_access_scope,
+            allowed_roles=settings.knowledge_default_allowed_roles.split(","),
+        )
         documents = enrich_documents_metadata(raw_documents)
         chunks = split_documents(documents, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         return cls(
