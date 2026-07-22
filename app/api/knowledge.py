@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from app.config import settings
 from app.rag import KnowledgeBase
@@ -8,12 +8,15 @@ from app.schemas import (
     KnowledgeDocumentSummary,
     KnowledgeIngestRequest,
     KnowledgeIngestResponse,
+    KnowledgeIngestionRetryRequest,
+    KnowledgeIngestionTaskRecord,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
     KnowledgeStatsResponse,
 )
 from app.rag.access_control import KnowledgeAccessContext
 from app.security import require_api_principal, require_api_token
+from app.tasks import KnowledgeIngestionQueue
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
@@ -94,9 +97,80 @@ async def ingest_knowledge(
     )
 
 
+@router.post(
+    "/ingestion-tasks",
+    response_model=KnowledgeIngestionTaskRecord,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def submit_knowledge_ingestion_task(
+    request: KnowledgeIngestRequest,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_api_token),
+) -> KnowledgeIngestionTaskRecord:
+    queue = _ingestion_queue()
+    task = queue.submit(request)
+    background_tasks.add_task(queue.run, task.task_id)
+    return task
+
+
+@router.get(
+    "/ingestion-tasks",
+    response_model=list[KnowledgeIngestionTaskRecord],
+)
+async def list_knowledge_ingestion_tasks(
+    limit: int = Query(default=20, ge=1, le=100),
+    _: None = Depends(require_api_token),
+) -> list[KnowledgeIngestionTaskRecord]:
+    return _ingestion_queue().list(limit=limit)
+
+
+@router.get(
+    "/ingestion-tasks/{task_id}",
+    response_model=KnowledgeIngestionTaskRecord,
+)
+async def get_knowledge_ingestion_task(
+    task_id: str,
+    _: None = Depends(require_api_token),
+) -> KnowledgeIngestionTaskRecord:
+    task = _ingestion_queue().get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Knowledge ingestion task not found")
+    return task
+
+
+@router.post(
+    "/ingestion-tasks/{task_id}/retry",
+    response_model=KnowledgeIngestionTaskRecord,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_knowledge_ingestion_task(
+    task_id: str,
+    request: KnowledgeIngestionRetryRequest,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_api_token),
+) -> KnowledgeIngestionTaskRecord:
+    queue = _ingestion_queue()
+    try:
+        task = queue.retry(task_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge ingestion task not found",
+        ) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    background_tasks.add_task(queue.run, task.task_id)
+    return task
+
+
 def _knowledge_base() -> KnowledgeBase:
     return KnowledgeBase.from_directory(
         settings.knowledge_local_path,
         chunk_size=settings.knowledge_ingest_chunk_size,
         chunk_overlap=settings.knowledge_ingest_chunk_overlap,
     )
+
+
+def _ingestion_queue() -> KnowledgeIngestionQueue:
+    return KnowledgeIngestionQueue()

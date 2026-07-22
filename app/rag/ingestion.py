@@ -1,7 +1,7 @@
 import base64
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any
+from typing import Any, Callable
 
 from app.config import settings
 from app.rag.document_loader import (
@@ -50,11 +50,14 @@ class KnowledgeIngestionPipeline:
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
         full_rebuild: bool = False,
+        progress_callback: Callable[[str, int], None] | None = None,
     ) -> KnowledgeIngestResponse:
         ingest_source = _ingest_source(source or settings.knowledge_source)
         source_path = path or _default_path(ingest_source)
+        _report_progress(progress_callback, "loading_documents", 10)
         raw_documents = await self._load_documents(ingest_source, source_path)
         documents = enrich_documents_metadata(raw_documents)
+        _report_progress(progress_callback, "documents_loaded", 30)
         resolved_chunk_size = chunk_size or settings.knowledge_ingest_chunk_size
         resolved_chunk_overlap = (
             chunk_overlap
@@ -69,6 +72,7 @@ class KnowledgeIngestionPipeline:
                 chunk_size=resolved_chunk_size,
                 chunk_overlap=resolved_chunk_overlap,
                 full_rebuild=full_rebuild,
+                progress_callback=progress_callback,
             )
 
         chunks = split_documents(
@@ -77,7 +81,9 @@ class KnowledgeIngestionPipeline:
             chunk_overlap=resolved_chunk_overlap,
         )
         chunks, engine_metadata = self._prepare_for_engine(documents, chunks)
+        _report_progress(progress_callback, "chunks_prepared", 60)
         store_metadata = self._upsert_chunks(chunks)
+        _report_progress(progress_callback, "vectors_persisted", 90)
 
         return KnowledgeIngestResponse(
             status="ok",
@@ -111,6 +117,7 @@ class KnowledgeIngestionPipeline:
         chunk_size: int,
         chunk_overlap: int,
         full_rebuild: bool,
+        progress_callback: Callable[[str, int], None] | None,
     ) -> KnowledgeIngestResponse:
         manifest_store = self.manifest_store or SQLiteKnowledgeManifestStore(
             settings.knowledge_manifest_db_path
@@ -130,6 +137,7 @@ class KnowledgeIngestionPipeline:
             index_signature=index_signature,
             full_rebuild=full_rebuild,
         )
+        _report_progress(progress_callback, "changes_planned", 45)
         chunks = split_documents(
             plan.documents_to_index,
             chunk_size=chunk_size,
@@ -139,18 +147,21 @@ class KnowledgeIngestionPipeline:
             plan.documents_to_index,
             chunks,
         )
+        _report_progress(progress_callback, "chunks_prepared", 60)
 
         store = self.milvus_store or MilvusVectorStore(
             embedding_model=self.embedding_model
         )
         store.ensure_collection()
         store.upsert_chunks(chunks)
+        _report_progress(progress_callback, "vectors_upserted", 80)
 
         upserted_chunk_ids = {chunk.chunk_id for chunk in chunks}
         chunks_to_delete = sorted(
             stale_chunk_ids(plan, existing_records) - upserted_chunk_ids
         )
         store.delete_chunks(chunks_to_delete)
+        _report_progress(progress_callback, "stale_vectors_deleted", 90)
 
         records = build_manifest_records(plan, chunks)
         deleted_doc_ids = [record.doc_id for record in plan.deleted_records]
@@ -372,3 +383,12 @@ def _document_metadata_summary(documents: list[RawDocument]) -> dict[str, Any]:
         "access_scopes": sorted(access_scopes),
         "allowed_roles": sorted(roles),
     }
+
+
+def _report_progress(
+    callback: Callable[[str, int], None] | None,
+    stage: str,
+    percent: int,
+) -> None:
+    if callback is not None:
+        callback(stage, percent)

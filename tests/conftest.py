@@ -31,6 +31,12 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "knowledge_system_roles", "oncall,sre")
     monkeypatch.setattr(settings, "knowledge_incremental_indexing_enabled", False)
     monkeypatch.setattr(settings, "knowledge_manifest_db_path", "app/data/knowledge_manifest.db")
+    monkeypatch.setattr(
+        settings,
+        "knowledge_ingestion_task_db_path",
+        "app/data/knowledge_ingestion_tasks.db",
+    )
+    monkeypatch.setattr(settings, "knowledge_ingestion_max_attempts", 3)
     monkeypatch.setattr(settings, "ops_tool_mode", "mock")
     monkeypatch.setattr(settings, "prometheus_base_url", None)
     monkeypatch.setattr(settings, "loki_base_url", None)

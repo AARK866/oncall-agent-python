@@ -165,6 +165,32 @@ class KnowledgeIngestResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class KnowledgeIngestionTaskStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+
+
+class KnowledgeIngestionTaskRecord(BaseModel):
+    task_id: str
+    status: KnowledgeIngestionTaskStatus
+    request: KnowledgeIngestRequest
+    attempt: int = Field(default=0, ge=0)
+    progress_stage: str = "queued"
+    progress_percent: int = Field(default=0, ge=0, le=100)
+    result: KnowledgeIngestResponse | None = None
+    error: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class KnowledgeIngestionRetryRequest(BaseModel):
+    requested_by: str = Field(default="manual", min_length=1, max_length=120)
+
+
 class ChatResponse(BaseModel):
     session_id: str
     answer: str
