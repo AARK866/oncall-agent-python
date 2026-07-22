@@ -39,6 +39,7 @@ Docs:
 - RAG retrieval evaluation: `docs/rag-evaluation.md`
 - Enterprise document ingestion: `docs/enterprise-document-ingestion.md`
 - Knowledge ACL: `docs/knowledge-acl.md`
+- Incremental knowledge indexing: `docs/incremental-indexing.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
 - Security and production: `docs/security-production.md`
 - Tools health API: `docs/tools-health-api.md`

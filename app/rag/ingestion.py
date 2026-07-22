@@ -12,11 +12,19 @@ from app.rag.document_loader import (
 )
 from app.rag.embeddings import create_embedding_model
 from app.rag.knowledge_base import enrich_documents_metadata
+from app.rag.incremental_index import (
+    build_index_namespace,
+    build_index_signature,
+    build_manifest_records,
+    plan_incremental_index,
+    stale_chunk_ids,
+)
 from app.rag.llamaindex_adapter import create_llamaindex_adapter
 from app.rag.milvus_store import MilvusVectorStore
 from app.rag.splitter import DocumentChunk, split_documents
 from app.rag.vector_store import InMemoryVectorStore
 from app.schemas import KnowledgeIngestResponse, KnowledgeIngestSource
+from app.storage import SQLiteKnowledgeManifestStore
 from app.tools import GitHubClient
 
 
@@ -27,9 +35,13 @@ class KnowledgeIngestionPipeline:
         self,
         embedding_model: Any | None = None,
         github_client: GitHubClient | None = None,
+        manifest_store: SQLiteKnowledgeManifestStore | None = None,
+        milvus_store: MilvusVectorStore | None = None,
     ) -> None:
         self.embedding_model = embedding_model or create_embedding_model()
         self.github_client = github_client or GitHubClient()
+        self.manifest_store = manifest_store
+        self.milvus_store = milvus_store
 
     async def ingest(
         self,
@@ -37,15 +49,32 @@ class KnowledgeIngestionPipeline:
         path: str | None = None,
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
+        full_rebuild: bool = False,
     ) -> KnowledgeIngestResponse:
         ingest_source = _ingest_source(source or settings.knowledge_source)
         source_path = path or _default_path(ingest_source)
         raw_documents = await self._load_documents(ingest_source, source_path)
         documents = enrich_documents_metadata(raw_documents)
+        resolved_chunk_size = chunk_size or settings.knowledge_ingest_chunk_size
+        resolved_chunk_overlap = (
+            chunk_overlap
+            if chunk_overlap is not None
+            else settings.knowledge_ingest_chunk_overlap
+        )
+        if self._incremental_indexing_enabled():
+            return self._ingest_incrementally(
+                ingest_source=ingest_source,
+                source_path=source_path,
+                documents=documents,
+                chunk_size=resolved_chunk_size,
+                chunk_overlap=resolved_chunk_overlap,
+                full_rebuild=full_rebuild,
+            )
+
         chunks = split_documents(
             documents,
-            chunk_size=chunk_size or settings.knowledge_ingest_chunk_size,
-            chunk_overlap=chunk_overlap if chunk_overlap is not None else settings.knowledge_ingest_chunk_overlap,
+            chunk_size=resolved_chunk_size,
+            chunk_overlap=resolved_chunk_overlap,
         )
         chunks, engine_metadata = self._prepare_for_engine(documents, chunks)
         store_metadata = self._upsert_chunks(chunks)
@@ -66,7 +95,108 @@ class KnowledgeIngestionPipeline:
                 "embedding_model": settings.embedding_model,
                 "embedding_dimensions": settings.embedding_dimensions,
                 "documents": _document_metadata_summary(documents),
+                "incremental": {
+                    "enabled": False,
+                    "mode": "full",
+                    "reason": "requires persistent Milvus and incremental indexing enabled",
+                },
             },
+        )
+
+    def _ingest_incrementally(
+        self,
+        ingest_source: KnowledgeIngestSource,
+        source_path: str,
+        documents: list[RawDocument],
+        chunk_size: int,
+        chunk_overlap: int,
+        full_rebuild: bool,
+    ) -> KnowledgeIngestResponse:
+        manifest_store = self.manifest_store or SQLiteKnowledgeManifestStore(
+            settings.knowledge_manifest_db_path
+        )
+        namespace = build_index_namespace(
+            source=ingest_source,
+            path=source_path,
+            github_repo=getattr(self.github_client, "repo", None),
+            github_branch=getattr(self.github_client, "branch", None),
+        )
+        existing_records = manifest_store.list_records(namespace)
+        index_signature = build_index_signature(chunk_size, chunk_overlap)
+        plan = plan_incremental_index(
+            documents=documents,
+            existing_records=existing_records,
+            namespace=namespace,
+            index_signature=index_signature,
+            full_rebuild=full_rebuild,
+        )
+        chunks = split_documents(
+            plan.documents_to_index,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        chunks, engine_metadata = self._prepare_for_engine(
+            plan.documents_to_index,
+            chunks,
+        )
+
+        store = self.milvus_store or MilvusVectorStore(
+            embedding_model=self.embedding_model
+        )
+        store.ensure_collection()
+        store.upsert_chunks(chunks)
+
+        upserted_chunk_ids = {chunk.chunk_id for chunk in chunks}
+        chunks_to_delete = sorted(
+            stale_chunk_ids(plan, existing_records) - upserted_chunk_ids
+        )
+        store.delete_chunks(chunks_to_delete)
+
+        records = build_manifest_records(plan, chunks)
+        deleted_doc_ids = [record.doc_id for record in plan.deleted_records]
+        manifest_store.apply(
+            namespace=namespace,
+            records=records,
+            deleted_doc_ids=deleted_doc_ids,
+        )
+
+        return KnowledgeIngestResponse(
+            status="ok",
+            source=ingest_source,
+            path=source_path,
+            documents_loaded=len(documents),
+            chunks_created=len(chunks),
+            vector_store=settings.knowledge_vector_store,
+            collection_name=store.collection_name,
+            document_ids=[document.doc_id for document in documents],
+            metadata={
+                **engine_metadata,
+                "store": "milvus",
+                "persisted": True,
+                "embedding_provider": settings.embedding_provider,
+                "embedding_model": settings.embedding_model,
+                "embedding_dimensions": settings.embedding_dimensions,
+                "documents": _document_metadata_summary(documents),
+                "incremental": {
+                    "enabled": True,
+                    "mode": "full_rebuild" if full_rebuild else "incremental",
+                    "namespace": namespace,
+                    "index_signature": index_signature,
+                    "new_documents": len(plan.new_documents),
+                    "updated_documents": len(plan.updated_documents),
+                    "unchanged_documents": len(plan.unchanged_documents),
+                    "deleted_documents": len(plan.deleted_records),
+                    "indexed_documents": len(plan.documents_to_index),
+                    "upserted_chunks": len(chunks),
+                    "deleted_chunks": len(chunks_to_delete),
+                },
+            },
+        )
+
+    def _incremental_indexing_enabled(self) -> bool:
+        return (
+            settings.knowledge_incremental_indexing_enabled
+            and settings.knowledge_vector_store.lower().strip() == "milvus"
         )
 
     async def _load_documents(

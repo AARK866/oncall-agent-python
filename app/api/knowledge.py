@@ -90,6 +90,7 @@ async def ingest_knowledge(
         path=request.path,
         chunk_size=request.chunk_size,
         chunk_overlap=request.chunk_overlap,
+        full_rebuild=request.full_rebuild,
     )
 
 

@@ -106,6 +106,11 @@ class MilvusVectorStore:
         ]
         self.client.upsert(collection_name=self.collection_name, data=records)
 
+    def delete_chunks(self, chunk_ids: list[str]) -> None:
+        if not chunk_ids:
+            return
+        self.client.delete(collection_name=self.collection_name, ids=chunk_ids)
+
     def search(
         self,
         query: str,

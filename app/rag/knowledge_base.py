@@ -228,10 +228,8 @@ class KnowledgeBase:
             return self._vector_store
 
         if store_mode == "milvus":
-            self._vector_store = MilvusVectorStore.from_chunks(
-                chunks=self.chunks,
-                embedding_model=embedding_model,
-            )
+            self._vector_store = MilvusVectorStore(embedding_model=embedding_model)
+            self._vector_store.ensure_collection()
             return self._vector_store
 
         raise ValueError(f"Unsupported KNOWLEDGE_VECTOR_STORE: {settings.knowledge_vector_store}")

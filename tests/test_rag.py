@@ -121,6 +121,60 @@ def test_keyword_mode_does_not_initialize_milvus(monkeypatch: pytest.MonkeyPatch
     assert results
 
 
+def test_vector_query_connects_to_milvus_without_reindexing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.rag import knowledge_base as knowledge_base_module
+
+    QueryOnlyMilvusStore.ensure_calls = 0
+    monkeypatch.setattr(settings, "knowledge_vector_store", "milvus")
+    monkeypatch.setattr(knowledge_base_module, "MilvusVectorStore", QueryOnlyMilvusStore)
+
+    kb = KnowledgeBase.from_directory("app/data/runbooks", retriever_mode="vector")
+    results = kb.search("payment 5xx", top_k=1)
+
+    assert results == []
+    assert QueryOnlyMilvusStore.ensure_calls == 1
+
+
 def test_milvus_store_requires_uri() -> None:
     with pytest.raises(ValueError, match="MILVUS_URI"):
         MilvusVectorStore(embedding_model=HashEmbeddingModel(), uri="", client=None)
+
+
+def test_milvus_store_deletes_chunks_by_primary_ids() -> None:
+    client = FakeMilvusClient()
+    store = MilvusVectorStore(
+        embedding_model=HashEmbeddingModel(dimensions=16),
+        uri="http://milvus:19530",
+        dimensions=16,
+        client=client,
+    )
+
+    store.delete_chunks(["payment.md#chunk-1", "order.md#chunk-0"])
+
+    assert client.deleted == {
+        "collection_name": settings.milvus_collection_name,
+        "ids": ["payment.md#chunk-1", "order.md#chunk-0"],
+    }
+
+
+class FakeMilvusClient:
+    def __init__(self) -> None:
+        self.deleted = None
+
+    def delete(self, **kwargs) -> None:
+        self.deleted = kwargs
+
+
+class QueryOnlyMilvusStore:
+    ensure_calls = 0
+
+    def __init__(self, embedding_model=None) -> None:
+        self.embedding_model = embedding_model
+
+    def ensure_collection(self) -> None:
+        type(self).ensure_calls += 1
+
+    def search(self, **kwargs):
+        return []

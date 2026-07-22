@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     knowledge_acl_enabled: bool = True
     knowledge_system_subject: str = "oncall-agent"
     knowledge_system_roles: str = "oncall,sre"
+    knowledge_incremental_indexing_enabled: bool = True
+    knowledge_manifest_db_path: str = "app/data/knowledge_manifest.db"
     milvus_uri: str | None = None
     milvus_token: str | None = None
     milvus_db_name: str | None = None

@@ -150,6 +150,7 @@ class KnowledgeIngestRequest(BaseModel):
     path: str | None = None
     chunk_size: int = Field(default=800, ge=100, le=8000)
     chunk_overlap: int = Field(default=120, ge=0, le=2000)
+    full_rebuild: bool = False
 
 
 class KnowledgeIngestResponse(BaseModel):
