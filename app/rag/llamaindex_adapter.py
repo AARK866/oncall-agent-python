@@ -109,10 +109,11 @@ class LlamaIndexAdapter:
         )
 
     def node_from_source(self, source: SourceDocument) -> Any:
+        document_id = str(source.metadata.get("doc_id") or source.doc_id).split("#chunk-", 1)[0]
         metadata = {
             **source.metadata,
             "chunk_id": source.doc_id,
-            "doc_id": source.metadata.get("doc_id", source.doc_id),
+            "doc_id": document_id,
             "title": source.title,
             "source": source.source or "",
             "knowledge_engine": "llamaindex",

@@ -1,0 +1,6 @@
+{"case_id":"payment-5xx-pool","query":"payment-api 5xx database connection pool exhausted","expected_doc_ids":["payment_5xx.md"],"top_k":3,"service":"payment-api","incident_type":"5xx"}
+{"case_id":"payment-deployment-rollback","query":"payment errors increased after a recent deployment, evaluate rollback","expected_doc_ids":["payment_5xx.md"],"top_k":3,"service":"payment-api","incident_type":"deployment"}
+{"case_id":"order-timeout-latency","query":"order-api P99 latency timeout and slow query","expected_doc_ids":["order_timeout.md"],"top_k":3,"service":"order-api","incident_type":"timeout"}
+{"case_id":"order-lock-wait","query":"order database lock contention and lock wait errors","expected_doc_ids":["order_timeout.md"],"top_k":3,"service":"order-api","incident_type":"database"}
+{"case_id":"payment-unfiltered-database","query":"payment failures connection refused pool exhausted","expected_doc_ids":["payment_5xx.md"],"top_k":3}
+{"case_id":"order-unfiltered-dependency","query":"inventory delivery service degraded and order creation delayed","expected_doc_ids":["order_timeout.md"],"top_k":3}

@@ -98,7 +98,8 @@ Results expose `retrieval_score`, `candidate_rank`, `rerank_score`, and
 `rerank_rank`, so ranking decisions can be inspected in production. Set
 `KNOWLEDGE_RERANKER=none` to bypass this step.
 
-The next LlamaIndex step should add retrieval quality evaluation:
+Retrieval quality is now measured by the evaluation dataset and CLI documented
+in `docs/rag-evaluation.md`:
 
 ```text
 evaluation questions + expected sources
@@ -106,6 +107,9 @@ evaluation questions + expected sources
   -> calculate hit rate and reciprocal rank
   -> detect quality regressions
 ```
+
+The next LlamaIndex step should expand document ingestion with file-type-aware
+readers and richer metadata extraction.
 
 Reference: LlamaIndex documents `Document` and `Node` as its core loading
 abstractions, where nodes are retrievable chunks with metadata inherited from

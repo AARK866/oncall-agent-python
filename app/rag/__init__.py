@@ -1,5 +1,6 @@
 from app.rag.document_loader import RawDocument, load_markdown_documents
 from app.rag.embeddings import HashEmbeddingModel, LangChainEmbeddingModel, create_embedding_model
+from app.rag.evaluation import RagRetrievalEvaluator, RetrievalEvaluationCase, RetrievalEvaluationReport
 from app.rag.ingestion import KnowledgeIngestionPipeline
 from app.rag.knowledge_base import KnowledgeBase
 from app.rag.llamaindex_adapter import (
@@ -33,6 +34,9 @@ __all__ = [
     "LocalKnowledgeBase",
     "MilvusVectorStore",
     "RawDocument",
+    "RagRetrievalEvaluator",
+    "RetrievalEvaluationCase",
+    "RetrievalEvaluationReport",
     "create_llamaindex_adapter",
     "create_embedding_model",
     "is_llamaindex_available",

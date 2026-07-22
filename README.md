@@ -12,6 +12,7 @@ python scripts/check_real_incident_flow.py --mock-llm
 python scripts/check_real_api_flow.py --in-process --mock-llm
 python scripts/check_alert_webhook.py --in-process --mock-llm
 python scripts/ingest_knowledge.py --source local --path app/data/runbooks
+python scripts/evaluate_rag.py --local-safe
 python scripts/run_acceptance.py
 docker compose up --build api
 .\.venv\Scripts\python.exe -m pytest
@@ -35,6 +36,7 @@ Docs:
 - Knowledge API: `docs/knowledge-api.md`
 - Knowledge ingestion: `docs/knowledge-ingestion.md`
 - LlamaIndex knowledge adapter: `docs/llamaindex-knowledge.md`
+- RAG retrieval evaluation: `docs/rag-evaluation.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
 - Security and production: `docs/security-production.md`
 - Tools health API: `docs/tools-health-api.md`
