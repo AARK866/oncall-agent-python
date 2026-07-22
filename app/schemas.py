@@ -118,6 +118,8 @@ class KnowledgeStatsResponse(BaseModel):
     document_count: int
     chunk_count: int
     knowledge_engine: str = "local"
+    reranker: str = "none"
+    rerank_candidate_multiplier: int = 1
     retriever_mode: str
     vector_store: str | None = None
     services: list[str] = Field(default_factory=list)

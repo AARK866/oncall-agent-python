@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from app.rag.llamaindex_adapter import LlamaIndexAdapter, create_llamaindex_adapter
+from app.rag.llamaindex_reranker import LlamaIndexReranker
 from app.schemas import SourceDocument
 
 
@@ -22,9 +23,13 @@ class LlamaIndexRetrieverAdapter:
         self,
         vector_store: SearchableVectorStore,
         adapter: LlamaIndexAdapter | None = None,
+        reranker: LlamaIndexReranker | None = None,
+        candidate_multiplier: int = 1,
     ) -> None:
         self.vector_store = vector_store
         self.adapter = adapter or create_llamaindex_adapter()
+        self.reranker = reranker
+        self.candidate_multiplier = max(candidate_multiplier, 1)
 
     def search(
         self,
@@ -32,30 +37,45 @@ class LlamaIndexRetrieverAdapter:
         top_k: int = 3,
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[SourceDocument]:
+        candidate_k = top_k * self.candidate_multiplier if self.reranker else top_k
         if self.adapter.available:
             retriever = _native_retriever(
                 vector_store=self.vector_store,
                 adapter=self.adapter,
-                top_k=top_k,
+                top_k=candidate_k,
                 metadata_filter=metadata_filter,
             )
             nodes = retriever.retrieve(query)
             results = [self.adapter.source_from_node(node) for node in nodes]
-            return [_with_retrieval_trace(result, native=True) for result in results]
+            traced = [_with_retrieval_trace(result, native=True) for result in results]
+            return self._rerank(query, traced, top_k)
 
         results = self.vector_store.search(
             query=query,
-            top_k=top_k,
+            top_k=candidate_k,
             metadata_filter=metadata_filter,
         )
-        return [_with_retrieval_trace(result, native=False) for result in results]
+        traced = [_with_retrieval_trace(result, native=False) for result in results]
+        return self._rerank(query, traced, top_k)
 
     def describe(self) -> dict[str, Any]:
         return {
             "engine": "llamaindex",
             "native": self.adapter.available,
             "backend": type(self.vector_store).__name__,
+            "reranker": self.reranker.describe() if self.reranker else None,
+            "candidate_multiplier": self.candidate_multiplier,
         }
+
+    def _rerank(
+        self,
+        query: str,
+        results: list[SourceDocument],
+        top_k: int,
+    ) -> list[SourceDocument]:
+        if self.reranker is None:
+            return results[:top_k]
+        return self.reranker.rerank(query=query, candidates=results, top_k=top_k)
 
 
 def _native_retriever(

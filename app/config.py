@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     github_branch: str = "main"
     github_timeout_seconds: int = 10
     knowledge_engine: str = "local"
+    knowledge_reranker: str = "llamaindex"
+    knowledge_rerank_candidate_multiplier: int = 3
+    knowledge_rerank_vector_weight: float = 0.7
+    knowledge_rerank_lexical_weight: float = 0.3
     tool_retry_max_attempts: int = 3
     tool_retry_base_delay_seconds: float = 0.05
     tool_retry_max_delay_seconds: float = 1.0

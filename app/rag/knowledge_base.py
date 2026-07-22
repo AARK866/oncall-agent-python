@@ -6,6 +6,7 @@ from app.rag.document_loader import RawDocument, load_markdown_documents
 from app.rag.embeddings import create_embedding_model
 from app.rag.llamaindex_adapter import create_llamaindex_adapter
 from app.rag.llamaindex_retriever import LlamaIndexRetrieverAdapter
+from app.rag.llamaindex_reranker import LlamaIndexReranker
 from app.rag.milvus_store import MilvusVectorStore
 from app.rag.retriever import LocalKnowledgeBase
 from app.rag.splitter import DocumentChunk, split_documents
@@ -124,6 +125,8 @@ class KnowledgeBase:
             "document_count": len(self.documents),
             "chunk_count": len(self.chunks),
             "knowledge_engine": settings.knowledge_engine,
+            "reranker": settings.knowledge_reranker,
+            "rerank_candidate_multiplier": settings.knowledge_rerank_candidate_multiplier,
             "retriever_mode": self.retriever_mode,
             "vector_store": settings.knowledge_vector_store,
             "embedding_provider": settings.embedding_provider,
@@ -156,7 +159,11 @@ class KnowledgeBase:
         engine = settings.knowledge_engine.strip().lower()
         if engine == "llamaindex":
             if self._llamaindex_retriever is None:
-                self._llamaindex_retriever = LlamaIndexRetrieverAdapter(store)
+                self._llamaindex_retriever = LlamaIndexRetrieverAdapter(
+                    store,
+                    reranker=_create_reranker(),
+                    candidate_multiplier=settings.knowledge_rerank_candidate_multiplier,
+                )
             return self._llamaindex_retriever.search(
                 query=query,
                 top_k=top_k,
@@ -249,6 +256,18 @@ class KnowledgeBase:
 
 def enrich_documents_metadata(documents: list[RawDocument]) -> list[RawDocument]:
     return [enrich_document_metadata(document) for document in documents]
+
+
+def _create_reranker() -> LlamaIndexReranker | None:
+    mode = settings.knowledge_reranker.strip().lower()
+    if mode in {"none", "off", "disabled", ""}:
+        return None
+    if mode == "llamaindex":
+        return LlamaIndexReranker(
+            vector_weight=settings.knowledge_rerank_vector_weight,
+            lexical_weight=settings.knowledge_rerank_lexical_weight,
+        )
+    raise ValueError(f"Unsupported KNOWLEDGE_RERANKER: {settings.knowledge_reranker}")
 
 
 def enrich_document_metadata(document: RawDocument) -> RawDocument:

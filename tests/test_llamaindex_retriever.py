@@ -1,6 +1,6 @@
 from typing import Any
 
-from app.rag import LlamaIndexRetrieverAdapter
+from app.rag import LlamaIndexReranker, LlamaIndexRetrieverAdapter
 from app.schemas import SourceDocument
 
 
@@ -26,6 +26,22 @@ def test_llamaindex_retriever_preserves_query_filter_score_and_trace() -> None:
     assert results[0].metadata["retriever"] == "llamaindex"
     assert results[0].metadata["retriever_backend"] == "fake-vector"
     assert results[0].metadata["llamaindex_native"] is True
+
+
+def test_llamaindex_retriever_overfetches_before_reranking() -> None:
+    store = FakeVectorStore()
+    retriever = LlamaIndexRetrieverAdapter(
+        store,
+        reranker=LlamaIndexReranker(vector_weight=0.3, lexical_weight=0.7),
+        candidate_multiplier=3,
+    )
+
+    results = retriever.search(query="payment 5xx", top_k=2)
+
+    assert store.last_request is not None
+    assert store.last_request["top_k"] == 6
+    assert len(results) == 1
+    assert results[0].metadata["reranker"] == "llamaindex"
 
 
 class FakeVectorStore:

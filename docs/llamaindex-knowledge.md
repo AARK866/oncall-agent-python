@@ -79,12 +79,32 @@ Every result includes retrieval trace metadata:
 - `retriever_backend=vector|milvus`;
 - `llamaindex_native=true|false`.
 
-The next LlamaIndex step should add post-retrieval reranking:
+## Post-retrieval Reranking
+
+Reranking is enabled by default for the LlamaIndex engine:
+
+```env
+KNOWLEDGE_RERANKER=llamaindex
+KNOWLEDGE_RERANK_CANDIDATE_MULTIPLIER=3
+KNOWLEDGE_RERANK_VECTOR_WEIGHT=0.7
+KNOWLEDGE_RERANK_LEXICAL_WEIGHT=0.3
+```
+
+The retriever first requests `top_k * candidate_multiplier` candidates. A
+LlamaIndex `BaseNodePostprocessor` then combines the original vector score with
+query-token coverage, sorts the candidates, and returns the requested `top_k`.
+
+Results expose `retrieval_score`, `candidate_rank`, `rerank_score`, and
+`rerank_rank`, so ranking decisions can be inspected in production. Set
+`KNOWLEDGE_RERANKER=none` to bypass this step.
+
+The next LlamaIndex step should add retrieval quality evaluation:
 
 ```text
-retrieve a wider candidate set
-  -> rerank by relevance
-  -> return the best top-k evidence
+evaluation questions + expected sources
+  -> run retrieval
+  -> calculate hit rate and reciprocal rank
+  -> detect quality regressions
 ```
 
 Reference: LlamaIndex documents `Document` and `Node` as its core loading

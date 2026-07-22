@@ -11,6 +11,7 @@ from app.rag.llamaindex_adapter import (
     is_llamaindex_available,
 )
 from app.rag.llamaindex_retriever import LlamaIndexRetrieverAdapter
+from app.rag.llamaindex_reranker import LlamaIndexReranker
 from app.rag.milvus_store import MilvusVectorStore
 from app.rag.retriever import LocalKnowledgeBase
 from app.rag.splitter import DocumentChunk, split_documents
@@ -28,6 +29,7 @@ __all__ = [
     "LlamaIndexIngestionBatch",
     "LlamaIndexNodeSnapshot",
     "LlamaIndexRetrieverAdapter",
+    "LlamaIndexReranker",
     "LocalKnowledgeBase",
     "MilvusVectorStore",
     "RawDocument",
