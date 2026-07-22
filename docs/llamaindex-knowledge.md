@@ -60,17 +60,31 @@ nodes. This matches the project's enterprise needs:
 ## Current Boundary
 
 The write path now goes through the LlamaIndex adapter when
-`KNOWLEDGE_ENGINE=llamaindex`. Retrieval still uses the project's current
-keyword, vector, and hybrid implementations.
-
-The next LlamaIndex step should introduce a retriever adapter:
+`KNOWLEDGE_ENGINE=llamaindex`. Vector and hybrid queries now also pass through
+LlamaIndex's `BaseRetriever` and `NodeWithScore` contracts while reusing the
+project's existing in-memory or Milvus backend.
 
 ```text
 query
-  -> current retrieval contract
-  -> LlamaIndex retriever
+  -> LlamaIndex BaseRetriever
+  -> current vector backend (in-memory or Milvus)
+  -> LlamaIndex NodeWithScore
   -> SourceDocument
-  -> existing Agent context
+  -> Agent context
+```
+
+Every result includes retrieval trace metadata:
+
+- `retriever=llamaindex`;
+- `retriever_backend=vector|milvus`;
+- `llamaindex_native=true|false`.
+
+The next LlamaIndex step should add post-retrieval reranking:
+
+```text
+retrieve a wider candidate set
+  -> rerank by relevance
+  -> return the best top-k evidence
 ```
 
 Reference: LlamaIndex documents `Document` and `Node` as its core loading

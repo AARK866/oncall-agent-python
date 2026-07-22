@@ -54,6 +54,18 @@ def test_vector_knowledge_base_searches_runbook() -> None:
     assert kb.stats()["retriever_mode"] == "vector"
 
 
+def test_vector_knowledge_base_uses_llamaindex_retriever(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "knowledge_engine", "llamaindex")
+    kb = KnowledgeBase.from_directory("app/data/runbooks", retriever_mode="vector")
+
+    results = kb.search("database connection pool exhausted", service="payment-api", top_k=1)
+
+    assert results
+    assert results[0].metadata["retriever"] == "llamaindex"
+    assert results[0].metadata["retriever_backend"] == "vector"
+    assert results[0].metadata["llamaindex_native"] is True
+
+
 def test_hybrid_knowledge_base_merges_keyword_and_vector_results() -> None:
     kb = KnowledgeBase.from_directory("app/data/runbooks", retriever_mode="hybrid")
 

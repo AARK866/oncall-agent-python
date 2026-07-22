@@ -102,16 +102,38 @@ class LlamaIndexAdapter:
             "source": chunk.source,
             "knowledge_engine": "llamaindex",
         }
+        return self._node(
+            node_id=chunk.chunk_id,
+            text=chunk.content,
+            metadata=metadata,
+        )
+
+    def node_from_source(self, source: SourceDocument) -> Any:
+        metadata = {
+            **source.metadata,
+            "chunk_id": source.doc_id,
+            "doc_id": source.metadata.get("doc_id", source.doc_id),
+            "title": source.title,
+            "source": source.source or "",
+            "knowledge_engine": "llamaindex",
+        }
+        return self._node(
+            node_id=source.doc_id,
+            text=source.content,
+            metadata=metadata,
+        )
+
+    def _node(self, node_id: str, text: str, metadata: dict[str, Any]) -> Any:
         if self._text_node_cls is None:
             return LlamaIndexNodeSnapshot(
-                node_id=chunk.chunk_id,
-                text=chunk.content,
+                node_id=node_id,
+                text=text,
                 metadata=metadata,
             )
 
         return self._text_node_cls(
-            id_=chunk.chunk_id,
-            text=chunk.content,
+            id_=node_id,
+            text=text,
             metadata=metadata,
         )
 

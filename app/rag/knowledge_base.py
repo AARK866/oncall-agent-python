@@ -5,6 +5,7 @@ from app.config import settings
 from app.rag.document_loader import RawDocument, load_markdown_documents
 from app.rag.embeddings import create_embedding_model
 from app.rag.llamaindex_adapter import create_llamaindex_adapter
+from app.rag.llamaindex_retriever import LlamaIndexRetrieverAdapter
 from app.rag.milvus_store import MilvusVectorStore
 from app.rag.retriever import LocalKnowledgeBase
 from app.rag.splitter import DocumentChunk, split_documents
@@ -40,6 +41,7 @@ class KnowledgeBase:
         self._documents_by_id = {document.doc_id: document for document in documents}
         self._keyword_retriever = LocalKnowledgeBase(chunks=chunks)
         self._vector_store: Any | None = None
+        self._llamaindex_retriever: LlamaIndexRetrieverAdapter | None = None
 
     @classmethod
     def from_directory(
@@ -150,7 +152,20 @@ class KnowledgeBase:
         top_k: int,
         metadata_filter: dict[str, Any] | None,
     ) -> list[SourceDocument]:
-        return self._get_vector_store().search(
+        store = self._get_vector_store()
+        engine = settings.knowledge_engine.strip().lower()
+        if engine == "llamaindex":
+            if self._llamaindex_retriever is None:
+                self._llamaindex_retriever = LlamaIndexRetrieverAdapter(store)
+            return self._llamaindex_retriever.search(
+                query=query,
+                top_k=top_k,
+                metadata_filter=metadata_filter,
+            )
+        if engine not in {"local", "", "default"}:
+            raise ValueError(f"Unsupported KNOWLEDGE_ENGINE: {settings.knowledge_engine}")
+
+        return store.search(
             query=query,
             top_k=top_k,
             metadata_filter=metadata_filter,
