@@ -34,6 +34,7 @@ Docs:
 - Vector store setup: `docs/vector-store.md`
 - Knowledge API: `docs/knowledge-api.md`
 - Knowledge ingestion: `docs/knowledge-ingestion.md`
+- LlamaIndex knowledge adapter: `docs/llamaindex-knowledge.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
 - Security and production: `docs/security-production.md`
 - Tools health API: `docs/tools-health-api.md`

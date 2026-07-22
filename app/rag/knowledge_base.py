@@ -4,6 +4,7 @@ from typing import Any
 from app.config import settings
 from app.rag.document_loader import RawDocument, load_markdown_documents
 from app.rag.embeddings import create_embedding_model
+from app.rag.llamaindex_adapter import create_llamaindex_adapter
 from app.rag.milvus_store import MilvusVectorStore
 from app.rag.retriever import LocalKnowledgeBase
 from app.rag.splitter import DocumentChunk, split_documents
@@ -116,13 +117,16 @@ class KnowledgeBase:
         ]
 
     def stats(self) -> dict[str, Any]:
+        adapter = create_llamaindex_adapter()
         return {
             "document_count": len(self.documents),
             "chunk_count": len(self.chunks),
+            "knowledge_engine": settings.knowledge_engine,
             "retriever_mode": self.retriever_mode,
             "vector_store": settings.knowledge_vector_store,
             "embedding_provider": settings.embedding_provider,
             "embedding_model": settings.embedding_model,
+            "llamaindex": adapter.describe(),
             "services": _collect_metadata_values(self.documents, "services"),
             "incident_types": _collect_metadata_values(self.documents, "incident_types"),
         }

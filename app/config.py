@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     github_repo: str | None = None
     github_branch: str = "main"
     github_timeout_seconds: int = 10
+    knowledge_engine: str = "local"
     tool_retry_max_attempts: int = 3
     tool_retry_base_delay_seconds: float = 0.05
     tool_retry_max_delay_seconds: float = 1.0

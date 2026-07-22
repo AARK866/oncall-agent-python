@@ -2,6 +2,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.main import app
 from app.rag import HashEmbeddingModel, KnowledgeIngestionPipeline
 from app.schemas import KnowledgeIngestSource
@@ -82,6 +83,35 @@ def test_knowledge_ingest_api_accepts_local_path(tmp_path) -> None:
     assert data["documents_loaded"] == 1
     assert data["chunks_created"] >= 1
     assert data["document_ids"] == ["order.md"]
+
+
+def test_knowledge_ingestion_can_prepare_llamaindex_shapes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "knowledge_engine", "llamaindex")
+    runbook_dir = tmp_path / "runbooks"
+    runbook_dir.mkdir()
+    (runbook_dir / "payment.md").write_text(
+        "# Payment Runbook\n\nCheck payment-api 5xx and rollback procedure.",
+        encoding="utf-8",
+    )
+
+    result = _run_async(
+        KnowledgeIngestionPipeline(
+            embedding_model=HashEmbeddingModel(dimensions=16),
+        ).ingest(
+            source=KnowledgeIngestSource.local,
+            path=str(runbook_dir),
+            chunk_size=200,
+            chunk_overlap=20,
+        )
+    )
+
+    assert result.metadata["knowledge_engine"] == "llamaindex"
+    assert result.metadata["llamaindex"]["engine"] == "llamaindex"
+    assert result.metadata["llamaindex"]["documents_prepared"] == 1
+    assert result.metadata["llamaindex"]["nodes_prepared"] == result.chunks_created
 
 
 class FakeGitHubClient:

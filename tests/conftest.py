@@ -14,6 +14,7 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "llm_api_key", None)
     monkeypatch.setattr(settings, "embedding_provider", "hash")
     monkeypatch.setattr(settings, "embedding_api_key", None)
+    monkeypatch.setattr(settings, "knowledge_engine", "local")
     monkeypatch.setattr(settings, "knowledge_retriever_mode", "keyword")
     monkeypatch.setattr(settings, "knowledge_vector_store", "in_memory")
     monkeypatch.setattr(settings, "ops_tool_mode", "mock")

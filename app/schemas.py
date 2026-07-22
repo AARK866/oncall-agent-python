@@ -117,6 +117,7 @@ class KnowledgeDocumentDetail(KnowledgeDocumentSummary):
 class KnowledgeStatsResponse(BaseModel):
     document_count: int
     chunk_count: int
+    knowledge_engine: str = "local"
     retriever_mode: str
     vector_store: str | None = None
     services: list[str] = Field(default_factory=list)

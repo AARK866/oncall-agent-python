@@ -5,6 +5,7 @@ from app.config import settings
 from app.rag.document_loader import RawDocument, load_markdown_documents
 from app.rag.embeddings import create_embedding_model
 from app.rag.knowledge_base import enrich_documents_metadata
+from app.rag.llamaindex_adapter import create_llamaindex_adapter
 from app.rag.milvus_store import MilvusVectorStore
 from app.rag.splitter import DocumentChunk, split_documents
 from app.rag.vector_store import InMemoryVectorStore
@@ -39,6 +40,7 @@ class KnowledgeIngestionPipeline:
             chunk_size=chunk_size or settings.knowledge_ingest_chunk_size,
             chunk_overlap=chunk_overlap if chunk_overlap is not None else settings.knowledge_ingest_chunk_overlap,
         )
+        engine_metadata = self._engine_metadata(documents, chunks)
         store_metadata = self._upsert_chunks(chunks)
 
         return KnowledgeIngestResponse(
@@ -51,6 +53,7 @@ class KnowledgeIngestionPipeline:
             collection_name=store_metadata.get("collection_name"),
             document_ids=[document.doc_id for document in documents],
             metadata={
+                **engine_metadata,
                 **store_metadata,
                 "embedding_provider": settings.embedding_provider,
                 "embedding_model": settings.embedding_model,
@@ -73,6 +76,30 @@ class KnowledgeIngestionPipeline:
             return await self._load_github_documents(path)
 
         raise ValueError(f"Unsupported knowledge source: {source}")
+
+    def _engine_metadata(
+        self,
+        documents: list[RawDocument],
+        chunks: list[DocumentChunk],
+    ) -> dict[str, Any]:
+        engine = settings.knowledge_engine.strip().lower()
+        if engine in {"local", "", "default"}:
+            return {"knowledge_engine": "local"}
+
+        if engine == "llamaindex":
+            adapter = create_llamaindex_adapter()
+            llama_documents = adapter.documents_from_raw(documents)
+            llama_nodes = adapter.nodes_from_chunks(chunks)
+            return {
+                "knowledge_engine": "llamaindex",
+                "llamaindex": {
+                    **adapter.describe(),
+                    "documents_prepared": len(llama_documents),
+                    "nodes_prepared": len(llama_nodes),
+                },
+            }
+
+        raise ValueError(f"Unsupported KNOWLEDGE_ENGINE: {settings.knowledge_engine}")
 
     async def _load_github_documents(self, path: str) -> list[RawDocument]:
         documents: list[RawDocument] = []
