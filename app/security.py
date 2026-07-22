@@ -4,6 +4,7 @@ import hmac
 from fastapi import HTTPException, Request, status
 
 from app.config import settings
+from app.rag.access_control import KnowledgeAccessContext
 
 API_KEY_HEADER = "x-api-key"
 AUTHORIZATION_HEADER = "authorization"
@@ -11,8 +12,17 @@ WEBHOOK_SIGNATURE_HEADER = "x-oncall-signature"
 
 
 async def require_api_token(request: Request) -> None:
+    await require_api_principal(request)
+
+
+async def require_api_principal(request: Request) -> KnowledgeAccessContext:
     if not _api_auth_required():
-        return
+        return KnowledgeAccessContext.from_roles(
+            subject="local-development",
+            roles=settings.api_token_roles.split(","),
+            authenticated=True,
+            source="local",
+        )
 
     expected_token = settings.api_token
     if not expected_token:
@@ -27,6 +37,13 @@ async def require_api_token(request: Request) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API token.",
         )
+
+    return KnowledgeAccessContext.from_roles(
+        subject=settings.api_token_subject,
+        roles=settings.api_token_roles.split(","),
+        authenticated=True,
+        source="api_token",
+    )
 
 
 async def require_webhook_auth(request: Request) -> None:

@@ -12,6 +12,7 @@ from app.agents.knowledge_agent import KnowledgeAgent
 from app.agents.llm_ops_assistant import LLMOpsAssistant
 from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
+from app.rag.access_control import KnowledgeAccessContext, system_access_context
 from app.schemas import (
     AlertSeverity,
     ChatMode,
@@ -71,6 +72,10 @@ class OpsGraphState:
     graph_runtime: str = "local"
     graph_runtime_reason: str = "default"
     graph_checkpointer: str = "not_used"
+    knowledge_subject: str = "oncall-agent"
+    knowledge_roles: list[str] = field(default_factory=list)
+    knowledge_authenticated: bool = True
+    knowledge_access_source: str = "system"
 
 
 class OpsGraphWorkflow:
@@ -119,7 +124,9 @@ class OpsGraphWorkflow:
         trigger_metadata: dict[str, Any] | None = None,
         thread_id: str | None = None,
         run_id: str | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> ChatResponse:
+        principal = access_context or system_access_context()
         metadata = dict(trigger_metadata or {})
         resolved_thread_id = str(
             thread_id
@@ -139,6 +146,10 @@ class OpsGraphWorkflow:
             alert_severity=alert_severity,
             alert_labels=alert_labels or {},
             trigger_metadata=metadata,
+            knowledge_subject=principal.subject,
+            knowledge_roles=sorted(principal.roles),
+            knowledge_authenticated=principal.authenticated,
+            knowledge_access_source=principal.source,
         )
         nodes = self._nodes()
         state.graph_trace = [name for name, _ in nodes]
@@ -509,6 +520,10 @@ class OpsGraphWorkflow:
             "graph_runtime_reason": state.graph_runtime_reason,
             "graph_checkpointer": state.graph_checkpointer,
             "graph_trace": state.graph_trace,
+            "knowledge_subject": state.knowledge_subject,
+            "knowledge_roles": state.knowledge_roles,
+            "knowledge_authenticated": state.knowledge_authenticated,
+            "knowledge_access_source": state.knowledge_access_source,
         }
 
     def _state_from_checkpoint(
@@ -552,6 +567,7 @@ class OpsGraphWorkflow:
         thread_id: str | None = None,
         run_id: str | None = None,
     ) -> OpsGraphState:
+        default_access = system_access_context()
         return OpsGraphState(
             question=str(snapshot.get("question") or question or ""),
             session_id=str(snapshot.get("session_id") or session_id or "default"),
@@ -583,6 +599,14 @@ class OpsGraphWorkflow:
             graph_runtime_reason=snapshot.get("graph_runtime_reason") or "restored",
             graph_checkpointer=snapshot.get("graph_checkpointer") or "not_used",
             graph_trace=snapshot.get("graph_trace") or [],
+            knowledge_subject=str(snapshot.get("knowledge_subject") or default_access.subject),
+            knowledge_roles=list(snapshot.get("knowledge_roles") or sorted(default_access.roles)),
+            knowledge_authenticated=bool(
+                snapshot.get("knowledge_authenticated", default_access.authenticated)
+            ),
+            knowledge_access_source=str(
+                snapshot.get("knowledge_access_source") or default_access.source
+            ),
         )
 
     def _remaining_nodes_after(
@@ -668,6 +692,12 @@ class OpsGraphWorkflow:
             top_k=2,
             service=self._service(state),
             incident_type="5xx" if "5xx" in state.question.lower() else None,
+            access_context=KnowledgeAccessContext.from_roles(
+                subject=state.knowledge_subject,
+                roles=state.knowledge_roles,
+                authenticated=state.knowledge_authenticated,
+                source=state.knowledge_access_source,
+            ),
         )
 
     async def _build_fallback_report_node(self, state: OpsGraphState) -> None:

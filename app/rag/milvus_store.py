@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 from app.config import settings
+from app.rag.access_control import KnowledgeAccessContext, can_access_document
 from app.rag.embeddings import EmbeddingModel, create_embedding_model
 from app.rag.filters import matches_metadata
 from app.rag.splitter import DocumentChunk
@@ -110,6 +111,7 @@ class MilvusVectorStore:
         query: str,
         top_k: int = 3,
         metadata_filter: dict[str, Any] | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> list[SourceDocument]:
         query_vector = self.embedding_model.embed(query)
         if not any(query_vector) and not metadata_filter:
@@ -119,7 +121,7 @@ class MilvusVectorStore:
             collection_name=self.collection_name,
             data=[query_vector],
             anns_field=self.vector_field,
-            limit=max(top_k * 5, top_k),
+            limit=max(top_k * 10, top_k),
             output_fields=[self.primary_field, "doc_id", "title", "content", "source", "metadata"],
             search_params={"metric_type": self.metric_type},
         )
@@ -128,6 +130,8 @@ class MilvusVectorStore:
         for hit in _first_result_set(raw_results):
             entity = _entity(hit)
             metadata = _metadata(entity)
+            if not can_access_document(metadata, access_context):
+                continue
             if metadata_filter and not matches_metadata(metadata, metadata_filter):
                 continue
 

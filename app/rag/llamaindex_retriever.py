@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from app.rag.llamaindex_adapter import LlamaIndexAdapter, create_llamaindex_adapter
+from app.rag.access_control import KnowledgeAccessContext
 from app.rag.llamaindex_reranker import LlamaIndexReranker
 from app.schemas import SourceDocument
 
@@ -13,6 +14,7 @@ class SearchableVectorStore(Protocol):
         query: str,
         top_k: int = 3,
         metadata_filter: dict[str, Any] | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> list[SourceDocument]: ...
 
 
@@ -36,6 +38,7 @@ class LlamaIndexRetrieverAdapter:
         query: str,
         top_k: int = 3,
         metadata_filter: dict[str, Any] | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> list[SourceDocument]:
         candidate_k = top_k * self.candidate_multiplier if self.reranker else top_k
         if self.adapter.available:
@@ -44,6 +47,7 @@ class LlamaIndexRetrieverAdapter:
                 adapter=self.adapter,
                 top_k=candidate_k,
                 metadata_filter=metadata_filter,
+                access_context=access_context,
             )
             nodes = retriever.retrieve(query)
             results = [self.adapter.source_from_node(node) for node in nodes]
@@ -54,6 +58,7 @@ class LlamaIndexRetrieverAdapter:
             query=query,
             top_k=candidate_k,
             metadata_filter=metadata_filter,
+            access_context=access_context,
         )
         traced = [_with_retrieval_trace(result, native=False) for result in results]
         return self._rerank(query, traced, top_k)
@@ -83,6 +88,7 @@ def _native_retriever(
     adapter: LlamaIndexAdapter,
     top_k: int,
     metadata_filter: dict[str, Any] | None,
+    access_context: KnowledgeAccessContext | None,
 ) -> Any:
     from llama_index.core.base.base_retriever import BaseRetriever
     from llama_index.core.schema import NodeWithScore, QueryBundle
@@ -93,6 +99,7 @@ def _native_retriever(
                 query=query_bundle.query_str,
                 top_k=top_k,
                 metadata_filter=metadata_filter,
+                access_context=access_context,
             )
             return [
                 NodeWithScore(

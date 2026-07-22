@@ -1,17 +1,27 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.agents import OpsAgent
 from app.schemas import ChatRequest, ChatResponse, IncidentDetailResponse, IncidentRecord
 from app.storage import SQLiteIncidentStore
+from app.rag.access_control import KnowledgeAccessContext
+from app.security import require_api_principal, require_api_token
 
-router = APIRouter(prefix="/api/incidents", tags=["incidents"])
+router = APIRouter(
+    prefix="/api/incidents",
+    tags=["incidents"],
+    dependencies=[Depends(require_api_token)],
+)
 
 
 @router.post("/analyze", response_model=ChatResponse)
-async def analyze_incident(request: ChatRequest) -> ChatResponse:
+async def analyze_incident(
+    request: ChatRequest,
+    principal: KnowledgeAccessContext = Depends(require_api_principal),
+) -> ChatResponse:
     return await OpsAgent.create_default(incident_store=_incident_store()).analyze(
         question=request.message,
         session_id=request.session_id,
+        access_context=principal,
     )
 
 

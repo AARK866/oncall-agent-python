@@ -12,30 +12,38 @@ from app.schemas import (
     KnowledgeSearchResponse,
     KnowledgeStatsResponse,
 )
-from app.security import require_api_token
+from app.rag.access_control import KnowledgeAccessContext
+from app.security import require_api_principal, require_api_token
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
 
 @router.get("/stats", response_model=KnowledgeStatsResponse)
-async def get_knowledge_stats() -> KnowledgeStatsResponse:
+async def get_knowledge_stats(
+    principal: KnowledgeAccessContext = Depends(require_api_principal),
+) -> KnowledgeStatsResponse:
     knowledge_base = _knowledge_base()
-    return KnowledgeStatsResponse.model_validate(knowledge_base.stats())
+    return KnowledgeStatsResponse.model_validate(knowledge_base.stats(principal))
 
 
 @router.get("/documents", response_model=list[KnowledgeDocumentSummary])
-async def list_knowledge_documents() -> list[KnowledgeDocumentSummary]:
+async def list_knowledge_documents(
+    principal: KnowledgeAccessContext = Depends(require_api_principal),
+) -> list[KnowledgeDocumentSummary]:
     knowledge_base = _knowledge_base()
     return [
         KnowledgeDocumentSummary.model_validate(document)
-        for document in knowledge_base.list_documents()
+        for document in knowledge_base.list_documents(principal)
     ]
 
 
 @router.get("/documents/{doc_id:path}", response_model=KnowledgeDocumentDetail)
-async def get_knowledge_document(doc_id: str) -> KnowledgeDocumentDetail:
+async def get_knowledge_document(
+    doc_id: str,
+    principal: KnowledgeAccessContext = Depends(require_api_principal),
+) -> KnowledgeDocumentDetail:
     knowledge_base = _knowledge_base()
-    document = knowledge_base.get_document(doc_id)
+    document = knowledge_base.get_document(doc_id, principal)
     if document is None:
         raise HTTPException(status_code=404, detail="Knowledge document not found")
 
@@ -49,7 +57,10 @@ async def get_knowledge_document(doc_id: str) -> KnowledgeDocumentDetail:
 
 
 @router.post("/search", response_model=KnowledgeSearchResponse)
-async def search_knowledge(request: KnowledgeSearchRequest) -> KnowledgeSearchResponse:
+async def search_knowledge(
+    request: KnowledgeSearchRequest,
+    principal: KnowledgeAccessContext = Depends(require_api_principal),
+) -> KnowledgeSearchResponse:
     knowledge_base = _knowledge_base()
     results = knowledge_base.search(
         query=request.query,
@@ -57,13 +68,14 @@ async def search_knowledge(request: KnowledgeSearchRequest) -> KnowledgeSearchRe
         service=request.service,
         incident_type=request.incident_type,
         keywords=request.keywords,
+        access_context=principal,
     )
     return KnowledgeSearchResponse(
         query=request.query,
         results=results,
         metadata={
             "retrieved_count": len(results),
-            "knowledge_base": knowledge_base.stats(),
+            "knowledge_base": knowledge_base.stats(principal),
         },
     )
 

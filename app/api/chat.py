@@ -1,30 +1,41 @@
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from app.agents import ConversationAgent
 from app.schemas import AgentEvent, AgentEventType, ChatRequest, ChatResponse
+from app.rag.access_control import KnowledgeAccessContext
+from app.security import require_api_principal
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
-    return await _conversation_agent().chat(request)
+async def chat(
+    request: ChatRequest,
+    principal: KnowledgeAccessContext = Depends(require_api_principal),
+) -> ChatResponse:
+    return await _conversation_agent().chat(request, access_context=principal)
 
 
 @router.post("/chat/stream")
-async def stream_chat(request: ChatRequest) -> StreamingResponse:
+async def stream_chat(
+    request: ChatRequest,
+    principal: KnowledgeAccessContext = Depends(require_api_principal),
+) -> StreamingResponse:
     return StreamingResponse(
-        _stream_chat_events(request),
+        _stream_chat_events(request, principal),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"},
     )
 
 
-async def _stream_chat_events(request: ChatRequest) -> AsyncIterator[str]:
+async def _stream_chat_events(
+    request: ChatRequest,
+    access_context: KnowledgeAccessContext,
+) -> AsyncIterator[str]:
     yield _format_sse(
         AgentEvent(
             event=AgentEventType.thinking,
@@ -33,7 +44,7 @@ async def _stream_chat_events(request: ChatRequest) -> AsyncIterator[str]:
         )
     )
 
-    response = await _conversation_agent().chat(request)
+    response = await _conversation_agent().chat(request, access_context=access_context)
 
     for step in response.metadata.get("react_steps", []):
         yield _format_sse(

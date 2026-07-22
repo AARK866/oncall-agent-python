@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     api_auth_enabled: bool = False
     api_token: str | None = None
+    api_token_subject: str = "api-client"
+    api_token_roles: str = "oncall,sre"
     webhook_secret: str | None = None
     require_auth_in_production: bool = True
     llm_provider: str = "mock"
@@ -35,6 +37,9 @@ class Settings(BaseSettings):
     knowledge_allowed_extensions: str = ".md,.txt,.pdf,.docx"
     knowledge_default_access_scope: str = "internal"
     knowledge_default_allowed_roles: str = "oncall,sre"
+    knowledge_acl_enabled: bool = True
+    knowledge_system_subject: str = "oncall-agent"
+    knowledge_system_roles: str = "oncall,sre"
     milvus_uri: str | None = None
     milvus_token: str | None = None
     milvus_db_name: str | None = None

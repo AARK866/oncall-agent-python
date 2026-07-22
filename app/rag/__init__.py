@@ -28,6 +28,7 @@ __all__ = [
     "HashEmbeddingModel",
     "InMemoryVectorStore",
     "KnowledgeBase",
+    "KnowledgeAccessContext",
     "KnowledgeIngestionPipeline",
     "LangChainEmbeddingModel",
     "LlamaIndexAdapter",
@@ -44,9 +45,12 @@ __all__ = [
     "RetrievalEvaluationReport",
     "create_llamaindex_adapter",
     "create_embedding_model",
+    "can_access_document",
     "is_llamaindex_available",
     "load_markdown_documents",
     "load_enterprise_documents",
     "load_file_document",
     "split_documents",
+    "system_access_context",
 ]
+from app.rag.access_control import KnowledgeAccessContext, can_access_document, system_access_context

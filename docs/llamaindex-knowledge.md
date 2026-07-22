@@ -109,8 +109,8 @@ evaluation questions + expected sources
 ```
 
 File-type-aware ingestion now supports Markdown, text, PDF, Word, and GitHub
-documents with a unified governance metadata contract. The next LlamaIndex step
-should enforce access-control metadata during retrieval.
+documents with a unified governance metadata contract. Access-control metadata
+is now enforced before LlamaIndex reranking or LLM context construction.
 
 Reference: LlamaIndex documents `Document` and `Node` as its core loading
 abstractions, where nodes are retrievable chunks with metadata inherited from

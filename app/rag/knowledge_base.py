@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.rag.access_control import KnowledgeAccessContext, can_access_document, system_access_context
 from app.rag.document_loader import RawDocument, load_enterprise_documents
 from app.rag.embeddings import create_embedding_model
 from app.rag.llamaindex_adapter import create_llamaindex_adapter
@@ -73,7 +74,9 @@ class KnowledgeBase:
         service: str | None = None,
         incident_type: str | None = None,
         keywords: list[str] | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> list[SourceDocument]:
+        principal = access_context or system_access_context()
         metadata_filter: dict[str, Any] = {}
         if service:
             metadata_filter["services"] = _canonical_value(service, SERVICE_ALIASES)
@@ -84,36 +87,48 @@ class KnowledgeBase:
         mode = self.retriever_mode.strip().lower()
 
         if mode == "keyword":
-            return self._keyword_search(built_query, top_k, metadata_filter or None)
+            return self._keyword_search(built_query, top_k, metadata_filter or None, principal)
         if mode == "vector":
             try:
-                return self._vector_search(built_query, top_k, metadata_filter or None)
+                return self._vector_search(built_query, top_k, metadata_filter or None, principal)
             except Exception as exc:
                 return self._fallback_keyword_search(
                     query=built_query,
                     top_k=top_k,
                     metadata_filter=metadata_filter or None,
+                    access_context=principal,
                     fallback_from="vector",
                     error=exc,
                 )
         if mode == "hybrid":
             try:
-                return self._hybrid_search(built_query, top_k, metadata_filter or None)
+                return self._hybrid_search(built_query, top_k, metadata_filter or None, principal)
             except Exception as exc:
                 return self._fallback_keyword_search(
                     query=built_query,
                     top_k=top_k,
                     metadata_filter=metadata_filter or None,
+                    access_context=principal,
                     fallback_from="hybrid",
                     error=exc,
                 )
 
         raise ValueError(f"Unsupported KNOWLEDGE_RETRIEVER_MODE: {self.retriever_mode}")
 
-    def get_document(self, doc_id: str) -> RawDocument | None:
-        return self._documents_by_id.get(doc_id)
+    def get_document(
+        self,
+        doc_id: str,
+        access_context: KnowledgeAccessContext | None = None,
+    ) -> RawDocument | None:
+        document = self._documents_by_id.get(doc_id)
+        if document is None or not can_access_document(document.metadata, access_context):
+            return None
+        return document
 
-    def list_documents(self) -> list[dict[str, Any]]:
+    def list_documents(
+        self,
+        access_context: KnowledgeAccessContext | None = None,
+    ) -> list[dict[str, Any]]:
         return [
             {
                 "doc_id": document.doc_id,
@@ -122,13 +137,24 @@ class KnowledgeBase:
                 "metadata": document.metadata,
             }
             for document in self.documents
+            if can_access_document(document.metadata, access_context)
         ]
 
-    def stats(self) -> dict[str, Any]:
+    def stats(self, access_context: KnowledgeAccessContext | None = None) -> dict[str, Any]:
         adapter = create_llamaindex_adapter()
+        visible_documents = [
+            document
+            for document in self.documents
+            if can_access_document(document.metadata, access_context)
+        ]
+        visible_chunks = [
+            chunk
+            for chunk in self.chunks
+            if can_access_document(chunk.metadata, access_context)
+        ]
         return {
-            "document_count": len(self.documents),
-            "chunk_count": len(self.chunks),
+            "document_count": len(visible_documents),
+            "chunk_count": len(visible_chunks),
             "knowledge_engine": settings.knowledge_engine,
             "reranker": settings.knowledge_reranker,
             "rerank_candidate_multiplier": settings.knowledge_rerank_candidate_multiplier,
@@ -137,8 +163,8 @@ class KnowledgeBase:
             "embedding_provider": settings.embedding_provider,
             "embedding_model": settings.embedding_model,
             "llamaindex": adapter.describe(),
-            "services": _collect_metadata_values(self.documents, "services"),
-            "incident_types": _collect_metadata_values(self.documents, "incident_types"),
+            "services": _collect_metadata_values(visible_documents, "services"),
+            "incident_types": _collect_metadata_values(visible_documents, "incident_types"),
         }
 
     def _keyword_search(
@@ -146,11 +172,13 @@ class KnowledgeBase:
         query: str,
         top_k: int,
         metadata_filter: dict[str, Any] | None,
+        access_context: KnowledgeAccessContext,
     ) -> list[SourceDocument]:
         results = self._keyword_retriever.search(
             query=query,
             top_k=top_k,
             metadata_filter=metadata_filter,
+            access_context=access_context,
         )
         return [_with_retriever(result, "keyword") for result in results]
 
@@ -159,6 +187,7 @@ class KnowledgeBase:
         query: str,
         top_k: int,
         metadata_filter: dict[str, Any] | None,
+        access_context: KnowledgeAccessContext,
     ) -> list[SourceDocument]:
         store = self._get_vector_store()
         engine = settings.knowledge_engine.strip().lower()
@@ -173,6 +202,7 @@ class KnowledgeBase:
                 query=query,
                 top_k=top_k,
                 metadata_filter=metadata_filter,
+                access_context=access_context,
             )
         if engine not in {"local", "", "default"}:
             raise ValueError(f"Unsupported KNOWLEDGE_ENGINE: {settings.knowledge_engine}")
@@ -181,6 +211,7 @@ class KnowledgeBase:
             query=query,
             top_k=top_k,
             metadata_filter=metadata_filter,
+            access_context=access_context,
         )
 
     def _get_vector_store(self):
@@ -210,9 +241,10 @@ class KnowledgeBase:
         query: str,
         top_k: int,
         metadata_filter: dict[str, Any] | None,
+        access_context: KnowledgeAccessContext,
     ) -> list[SourceDocument]:
-        keyword_results = self._keyword_search(query, top_k, metadata_filter)
-        vector_results = self._vector_search(query, top_k, metadata_filter)
+        keyword_results = self._keyword_search(query, top_k, metadata_filter, access_context)
+        vector_results = self._vector_search(query, top_k, metadata_filter, access_context)
         merged: dict[str, SourceDocument] = {}
 
         for result in vector_results:
@@ -244,10 +276,11 @@ class KnowledgeBase:
         query: str,
         top_k: int,
         metadata_filter: dict[str, Any] | None,
+        access_context: KnowledgeAccessContext,
         fallback_from: str,
         error: Exception,
     ) -> list[SourceDocument]:
-        results = self._keyword_search(query, top_k, metadata_filter)
+        results = self._keyword_search(query, top_k, metadata_filter, access_context)
         return [
             _with_recovery_metadata(
                 result,

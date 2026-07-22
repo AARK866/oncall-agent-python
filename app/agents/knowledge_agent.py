@@ -3,6 +3,7 @@ from typing import Sequence
 
 from app.llm import LLMClient, create_llm_client
 from app.rag import KnowledgeBase
+from app.rag.access_control import KnowledgeAccessContext, system_access_context
 from app.schemas import ChatMessage, ChatMode, ChatResponse, MessageRole, SourceDocument
 
 
@@ -32,13 +33,16 @@ class KnowledgeAgent:
         service: str | None = None,
         incident_type: str | None = None,
         keywords: list[str] | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> ChatResponse:
+        principal = access_context or system_access_context()
         sources = self.search(
             question=question,
             top_k=top_k,
             service=service,
             incident_type=incident_type,
             keywords=keywords,
+            access_context=principal,
         )
         if not sources:
             return ChatResponse(
@@ -49,12 +53,17 @@ class KnowledgeAgent:
                 ),
                 mode=ChatMode.knowledge,
                 sources=[],
-                metadata={"retrieved_count": 0, "knowledge_base": self.knowledge_base.stats()},
+                metadata={
+                    "retrieved_count": 0,
+                    "knowledge_base": self.knowledge_base.stats(principal),
+                    "access_control": _access_metadata(principal),
+                },
             )
 
         metadata = {
             "retrieved_count": len(sources),
-            "knowledge_base": self.knowledge_base.stats(),
+            "knowledge_base": self.knowledge_base.stats(principal),
+            "access_control": _access_metadata(principal),
             **self._recovery_metadata(sources),
         }
         messages = self._build_messages(question=question, sources=sources)
@@ -84,6 +93,7 @@ class KnowledgeAgent:
         service: str | None = None,
         incident_type: str | None = None,
         keywords: list[str] | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> list[SourceDocument]:
         return self.knowledge_base.search(
             query=question,
@@ -91,6 +101,7 @@ class KnowledgeAgent:
             service=service,
             incident_type=incident_type,
             keywords=keywords,
+            access_context=access_context,
         )
 
     def _build_messages(self, question: str, sources: Sequence[SourceDocument]) -> list[ChatMessage]:
@@ -155,3 +166,12 @@ class KnowledgeAgent:
                 "recoveries": recoveries,
             }
         }
+
+
+def _access_metadata(context: KnowledgeAccessContext) -> dict:
+    return {
+        "enforced": True,
+        "subject": context.subject,
+        "roles": sorted(context.roles),
+        "source": context.source,
+    }

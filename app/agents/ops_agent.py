@@ -7,6 +7,7 @@ from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
 from app.config import settings
 from app.llm import LLMClient, create_llm_client
+from app.rag.access_control import KnowledgeAccessContext
 from app.schemas import (
     AlertSeverity,
     ChatMode,
@@ -77,6 +78,7 @@ class OpsAgent:
         trigger_metadata: dict[str, object] | None = None,
         thread_id: str | None = None,
         run_id: str | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> ChatResponse:
         return await self.graph.run(
             question=question,
@@ -87,6 +89,7 @@ class OpsAgent:
             trigger_metadata=trigger_metadata,
             thread_id=thread_id,
             run_id=run_id,
+            access_context=access_context,
         )
 
     async def resume(

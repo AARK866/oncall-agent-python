@@ -3,6 +3,7 @@ from app.agents.ops_agent import OpsAgent
 from app.llm import LLMClient, create_llm_client
 from app.memory import InMemoryConversationMemory
 from app.schemas import ChatMode, ChatRequest, ChatResponse
+from app.rag.access_control import KnowledgeAccessContext
 
 
 class ConversationAgent:
@@ -24,7 +25,11 @@ class ConversationAgent:
     def create_default(cls) -> "ConversationAgent":
         return cls(knowledge_agent=KnowledgeAgent.from_runbook_directory())
 
-    async def chat(self, request: ChatRequest) -> ChatResponse:
+    async def chat(
+        self,
+        request: ChatRequest,
+        access_context: KnowledgeAccessContext | None = None,
+    ) -> ChatResponse:
         mode = self._resolve_mode(request)
         self.memory.add_user_message(session_id=request.session_id, content=request.message)
 
@@ -32,11 +37,13 @@ class ConversationAgent:
             response = await self.knowledge_agent.answer(
                 question=request.message,
                 session_id=request.session_id,
+                access_context=access_context,
             )
         elif mode == ChatMode.ops:
             response = await self.ops_agent.analyze(
                 question=request.message,
                 session_id=request.session_id,
+                access_context=access_context,
             )
         else:
             response = await self._general_response(request)

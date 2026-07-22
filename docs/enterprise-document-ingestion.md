@@ -40,5 +40,5 @@ Run GitHub ingestion:
 GitHub text and binary content follow the same Reader path. Temporary copies of
 PDF and Word files are removed immediately after parsing.
 
-This step attaches ACL metadata but does not enforce authorization during
-retrieval yet. Retrieval-time ACL filtering is the next security boundary.
+ACL metadata is enforced during keyword, vector, and Milvus retrieval. See
+`docs/knowledge-acl.md` for identity propagation and policy rules.

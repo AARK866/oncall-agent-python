@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.rag import LlamaIndexReranker, LlamaIndexRetrieverAdapter
+from app.rag.access_control import KnowledgeAccessContext
 from app.schemas import SourceDocument
 
 
@@ -53,6 +54,7 @@ class FakeVectorStore:
         query: str,
         top_k: int = 3,
         metadata_filter: dict[str, Any] | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> list[SourceDocument]:
         self.last_request = {
             "query": query,

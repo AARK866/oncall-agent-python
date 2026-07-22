@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.rag.embeddings import EmbeddingModel, HashEmbeddingModel
+from app.rag.access_control import KnowledgeAccessContext, can_access_document
 from app.rag.filters import matches_metadata
 from app.rag.splitter import DocumentChunk
 from app.schemas import SourceDocument
@@ -46,6 +47,7 @@ class InMemoryVectorStore:
         query: str,
         top_k: int = 3,
         metadata_filter: dict[str, Any] | None = None,
+        access_context: KnowledgeAccessContext | None = None,
     ) -> list[SourceDocument]:
         query_vector = self.embedding_model.embed(query)
         if not any(query_vector) and not metadata_filter:
@@ -53,6 +55,8 @@ class InMemoryVectorStore:
 
         scored_entries: list[tuple[float, VectorEntry]] = []
         for entry in self.entries:
+            if not can_access_document(entry.chunk.metadata, access_context):
+                continue
             if metadata_filter and not matches_metadata(entry.chunk.metadata, metadata_filter):
                 continue
 
