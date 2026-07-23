@@ -3,16 +3,28 @@ from app.schemas import (
     WorkflowApplicationRecord,
     WorkflowApplicationUpdate,
     WorkflowDraftRecord,
+    WorkflowDraftRunRequest,
+    WorkflowDraftRunResponse,
     WorkflowDraftUpdate,
+    WorkflowValidationReport,
 )
 from app.storage import SQLiteWorkflowStore
+from app.workflows.compiler import WorkflowCompiler
+from app.workflows.validator import WorkflowValidator
 
 
 class WorkflowService:
     """Application service for the workflow control plane."""
 
-    def __init__(self, store: SQLiteWorkflowStore | None = None) -> None:
+    def __init__(
+        self,
+        store: SQLiteWorkflowStore | None = None,
+        validator: WorkflowValidator | None = None,
+        compiler: WorkflowCompiler | None = None,
+    ) -> None:
         self.store = store or SQLiteWorkflowStore.from_settings()
+        self.validator = validator or WorkflowValidator()
+        self.compiler = compiler or WorkflowCompiler(validator=self.validator)
 
     def create(self, request: WorkflowApplicationCreate) -> WorkflowApplicationRecord:
         application, _ = self.store.create_application(request)
@@ -51,4 +63,22 @@ class WorkflowService:
             app_id=app_id,
             expected_revision=request.expected_revision,
             graph=request.graph,
+        )
+
+    def validate_draft(self, app_id: str) -> WorkflowValidationReport:
+        draft = self.get_draft(app_id)
+        return self.validator.validate(draft.graph)
+
+    async def run_draft(
+        self,
+        app_id: str,
+        request: WorkflowDraftRunRequest,
+    ) -> WorkflowDraftRunResponse:
+        draft = self.get_draft(app_id)
+        compiled = self.compiler.compile(draft.graph)
+        return await compiled.run(
+            app_id=app_id,
+            draft_revision=draft.revision,
+            inputs=request.inputs,
+            thread_id=request.thread_id,
         )

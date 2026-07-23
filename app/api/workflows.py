@@ -5,11 +5,18 @@ from app.schemas import (
     WorkflowApplicationRecord,
     WorkflowApplicationUpdate,
     WorkflowDraftRecord,
+    WorkflowDraftRunRequest,
+    WorkflowDraftRunResponse,
     WorkflowDraftUpdate,
+    WorkflowValidationReport,
 )
 from app.security import require_api_token
 from app.storage import WorkflowRevisionConflict
-from app.workflows import WorkflowService
+from app.workflows import (
+    WorkflowNodeExecutionError,
+    WorkflowService,
+    WorkflowValidationError,
+)
 
 router = APIRouter(
     prefix="/api/workflow-apps",
@@ -91,6 +98,49 @@ async def update_workflow_draft(
                 "current_revision": exc.current_revision,
             },
         ) from None
+
+
+@router.post(
+    "/{app_id}/draft/validate",
+    response_model=WorkflowValidationReport,
+)
+async def validate_workflow_draft(app_id: str) -> WorkflowValidationReport:
+    try:
+        return _service().validate_draft(app_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow application not found",
+        ) from None
+
+
+@router.post(
+    "/{app_id}/draft/run",
+    response_model=WorkflowDraftRunResponse,
+)
+async def run_workflow_draft(
+    app_id: str,
+    request: WorkflowDraftRunRequest,
+) -> WorkflowDraftRunResponse:
+    try:
+        return await _service().run_draft(app_id, request)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow application not found",
+        ) from None
+    except WorkflowValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=exc.report.model_dump(mode="json"),
+        ) from None
+    except WorkflowNodeExecutionError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"message": str(exc), "node_id": exc.node_id},
+        ) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 def _service() -> WorkflowService:

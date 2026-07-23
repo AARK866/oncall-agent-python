@@ -296,6 +296,50 @@ class WorkflowDraftRecord(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class WorkflowValidationSeverity(str, Enum):
+    error = "error"
+    warning = "warning"
+
+
+class WorkflowValidationIssue(BaseModel):
+    code: str
+    message: str
+    severity: WorkflowValidationSeverity = WorkflowValidationSeverity.error
+    node_id: str | None = None
+    edge_id: str | None = None
+
+
+class WorkflowValidationReport(BaseModel):
+    valid: bool
+    issues: list[WorkflowValidationIssue] = Field(default_factory=list)
+    node_count: int = 0
+    edge_count: int = 0
+    start_node_id: str | None = None
+    end_node_id: str | None = None
+
+
+class WorkflowDraftRunRequest(BaseModel):
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    thread_id: str | None = Field(default=None, max_length=200)
+
+
+class WorkflowRunStatus(str, Enum):
+    succeeded = "succeeded"
+    waiting_review = "waiting_review"
+
+
+class WorkflowDraftRunResponse(BaseModel):
+    app_id: str
+    draft_revision: int
+    thread_id: str
+    status: WorkflowRunStatus
+    output: Any = None
+    node_outputs: dict[str, Any] = Field(default_factory=dict)
+    trace: list[str] = Field(default_factory=list)
+    review_requests: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ChatResponse(BaseModel):
     session_id: str
     answer: str

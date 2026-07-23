@@ -22,9 +22,9 @@ transaction. A draft contains:
 - an integer `revision` used for optimistic concurrency.
 
 Supported initial node types are `start`, `agent`, `knowledge_retrieval`, `tool`,
-`human_review`, and `end`. Graph validation and LangGraph compilation are added
-in the next phase; an empty graph is valid while a workflow is first being
-designed.
+`human_review`, and `end`. An empty graph is valid while a workflow is first
+being designed, but it must pass validation before execution. See
+`docs/workflow-validation-runtime.md` for compilation and runtime rules.
 
 ## Persistence
 
