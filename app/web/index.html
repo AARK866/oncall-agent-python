@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>OnCall Agent Control</title>
+  <link rel="icon" href="/console/assets/oncall-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/console/assets/styles.css">
+  <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script defer src="/console/assets/app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="icon-button mobile-only" id="sidebarToggle" type="button" aria-label="打开应用列表" title="应用列表">
+        <i data-lucide="panel-left"></i>
+      </button>
+      <a class="brand" href="/console" aria-label="OnCall Agent Control">
+        <img src="/console/assets/oncall-mark.svg" alt="">
+        <span>OnCall Agent</span>
+        <strong>Control</strong>
+      </a>
+      <div class="topbar-status" id="connectionStatus">
+        <span class="status-dot"></span>
+        <span>正在连接</span>
+      </div>
+      <button class="icon-button" id="connectionButton" type="button" aria-label="连接设置" title="连接设置">
+        <i data-lucide="key-round"></i>
+      </button>
+    </header>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-heading">
+        <span>工作流应用</span>
+        <button class="icon-button small" id="createAppButton" type="button" aria-label="新建工作流应用" title="新建应用">
+          <i data-lucide="plus"></i>
+        </button>
+      </div>
+      <div class="sidebar-search">
+        <i data-lucide="search"></i>
+        <input id="appSearch" type="search" placeholder="搜索应用" autocomplete="off">
+      </div>
+      <nav class="app-list" id="appList" aria-label="工作流应用"></nav>
+      <div class="sidebar-footer">
+        <button class="text-button" id="refreshAppsButton" type="button">
+          <i data-lucide="refresh-cw"></i>
+          刷新
+        </button>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <section class="empty-workspace" id="emptyWorkspace">
+        <img src="/console/assets/oncall-mark.svg" alt="">
+        <h1>OnCall Agent Control</h1>
+        <p id="emptyMessage">暂无工作流应用</p>
+        <button class="primary-button" id="emptyCreateButton" type="button">
+          <i data-lucide="plus"></i>
+          新建应用
+        </button>
+      </section>
+
+      <section class="app-workspace hidden" id="appWorkspace">
+        <header class="workspace-header">
+          <div class="app-identity">
+            <div class="title-line">
+              <h1 id="appTitle">工作流</h1>
+              <span class="status-badge" id="appStatus">active</span>
+            </div>
+            <p id="appDescription"></p>
+          </div>
+          <div class="header-meta">
+            <span id="draftRevision">草稿 r1</span>
+            <span id="saveState">已保存</span>
+          </div>
+        </header>
+
+        <nav class="tabs" id="workspaceTabs" aria-label="工作流视图">
+          <button class="tab active" type="button" data-tab="designer">
+            <i data-lucide="workflow"></i>
+            设计
+          </button>
+          <button class="tab" type="button" data-tab="versions">
+            <i data-lucide="tags"></i>
+            版本
+          </button>
+          <button class="tab" type="button" data-tab="runs">
+            <i data-lucide="activity"></i>
+            运行
+          </button>
+          <button class="tab" type="button" data-tab="audit">
+            <i data-lucide="scroll-text"></i>
+            审计
+          </button>
+        </nav>
+
+        <section class="tab-panel designer-panel active" data-panel="designer">
+          <div class="command-bar">
+            <div class="command-group">
+              <button class="secondary-button" id="addNodeButton" type="button">
+                <i data-lucide="square-plus"></i>
+                节点
+              </button>
+              <button class="secondary-button" id="addEdgeButton" type="button">
+                <i data-lucide="git-commit-horizontal"></i>
+                连线
+              </button>
+            </div>
+            <div class="command-group command-group-right">
+              <button class="secondary-button" id="validateButton" type="button">
+                <i data-lucide="shield-check"></i>
+                校验
+              </button>
+              <button class="secondary-button" id="saveDraftButton" type="button">
+                <i data-lucide="save"></i>
+                保存
+              </button>
+              <button class="secondary-button" id="publishButton" type="button">
+                <i data-lucide="send"></i>
+                发布
+              </button>
+              <button class="primary-button" id="runDraftButton" type="button">
+                <i data-lucide="play"></i>
+                运行
+              </button>
+            </div>
+          </div>
+
+          <div class="validation-strip hidden" id="validationStrip">
+            <div class="validation-summary">
+              <i data-lucide="circle-check"></i>
+              <span id="validationSummary"></span>
+            </div>
+            <button class="icon-button small" id="closeValidationButton" type="button" aria-label="关闭校验结果" title="关闭">
+              <i data-lucide="x"></i>
+            </button>
+            <div class="validation-issues" id="validationIssues"></div>
+          </div>
+
+          <div class="designer-layout">
+            <div class="canvas-viewport" id="canvasViewport">
+              <div class="workflow-canvas" id="workflowCanvas">
+                <svg class="edge-layer" id="edgeLayer" aria-hidden="true">
+                  <defs>
+                    <marker id="edgeArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                      <path d="M 0 0 L 10 5 L 0 10 z"></path>
+                    </marker>
+                  </defs>
+                </svg>
+                <div class="node-layer" id="nodeLayer"></div>
+              </div>
+            </div>
+
+            <aside class="inspector" id="inspector">
+              <div class="inspector-tabs">
+                <button class="inspector-tab active" type="button" data-inspector-tab="node">节点</button>
+                <button class="inspector-tab" type="button" data-inspector-tab="graph">全局</button>
+              </div>
+              <div class="inspector-body" id="nodeInspector">
+                <div class="inspector-empty" id="nodeInspectorEmpty">未选择节点</div>
+                <div class="hidden" id="nodeInspectorForm">
+                  <label class="field">
+                    <span>名称</span>
+                    <input id="nodeNameInput" type="text" maxlength="200">
+                  </label>
+                  <label class="field">
+                    <span>节点 ID</span>
+                    <input id="nodeIdInput" type="text" readonly>
+                  </label>
+                  <label class="field">
+                    <span>类型</span>
+                    <select id="nodeTypeInput">
+                      <option value="start">Start</option>
+                      <option value="agent">Agent</option>
+                      <option value="knowledge_retrieval">Knowledge</option>
+                      <option value="tool">Tool</option>
+                      <option value="human_review">Human Review</option>
+                      <option value="end">End</option>
+                    </select>
+                  </label>
+                  <label class="field field-grow">
+                    <span>配置 JSON</span>
+                    <textarea id="nodeConfigInput" spellcheck="false"></textarea>
+                  </label>
+                  <div class="inspector-actions">
+                    <button class="danger-button" id="deleteNodeButton" type="button">
+                      <i data-lucide="trash-2"></i>
+                      删除节点
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="inspector-body hidden" id="graphInspector">
+                <label class="field">
+                  <span>输入变量 JSON</span>
+                  <textarea id="graphVariablesInput" spellcheck="false"></textarea>
+                </label>
+                <label class="field">
+                  <span>全局设置 JSON</span>
+                  <textarea id="graphSettingsInput" spellcheck="false"></textarea>
+                </label>
+                <div class="edge-heading">
+                  <span>连线</span>
+                  <span id="edgeCount">0</span>
+                </div>
+                <div class="edge-list" id="edgeList"></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="versions">
+          <div class="section-toolbar">
+            <div>
+              <h2>版本</h2>
+              <span id="versionCount">0 个版本</span>
+            </div>
+            <button class="secondary-button" id="refreshVersionsButton" type="button">
+              <i data-lucide="refresh-cw"></i>
+              刷新
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>版本</th>
+                  <th>草稿修订</th>
+                  <th>发布者</th>
+                  <th>内容哈希</th>
+                  <th>发布时间</th>
+                  <th class="actions-column">操作</th>
+                </tr>
+              </thead>
+              <tbody id="versionsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="runs">
+          <div class="metrics-row" id="metricsRow">
+            <div class="metric">
+              <span>运行总数</span>
+              <strong id="metricTotal">0</strong>
+            </div>
+            <div class="metric">
+              <span>成功率</span>
+              <strong id="metricSuccess">0%</strong>
+            </div>
+            <div class="metric">
+              <span>P95 耗时</span>
+              <strong id="metricP95">--</strong>
+            </div>
+            <div class="metric">
+              <span>待审批</span>
+              <strong id="metricReviews">0</strong>
+            </div>
+          </div>
+          <div class="section-toolbar">
+            <div>
+              <h2>运行记录</h2>
+              <span id="runCount">0 条记录</span>
+            </div>
+            <div class="toolbar-controls">
+              <select id="runStatusFilter" aria-label="运行状态">
+                <option value="">全部状态</option>
+                <option value="running">Running</option>
+                <option value="waiting_review">Waiting Review</option>
+                <option value="succeeded">Succeeded</option>
+                <option value="failed">Failed</option>
+                <option value="rejected">Rejected</option>
+              </select>
+              <button class="secondary-button" id="refreshRunsButton" type="button">
+                <i data-lucide="refresh-cw"></i>
+                刷新
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>运行 ID</th>
+                  <th>来源</th>
+                  <th>状态</th>
+                  <th>发起者</th>
+                  <th>创建时间</th>
+                  <th>耗时</th>
+                </tr>
+              </thead>
+              <tbody id="runsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="audit">
+          <div class="section-toolbar">
+            <div>
+              <h2>审计日志</h2>
+              <span id="auditCount">0 条记录</span>
+            </div>
+            <button class="secondary-button" id="refreshAuditButton" type="button">
+              <i data-lucide="refresh-cw"></i>
+              刷新
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>操作者</th>
+                  <th>动作</th>
+                  <th>资源</th>
+                  <th>详情</th>
+                </tr>
+              </thead>
+              <tbody id="auditTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="connectionDialog">
+    <form method="dialog" class="dialog-form" id="connectionForm">
+      <div class="dialog-header">
+        <h2>连接设置</h2>
+        <button class="icon-button" value="cancel" aria-label="关闭" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <label class="field">
+        <span>API 地址</span>
+        <input id="apiBaseInput" type="url" placeholder="同源">
+      </label>
+      <label class="field">
+        <span>API Token</span>
+        <input id="apiTokenInput" type="password" autocomplete="off">
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" value="cancel">取消</button>
+        <button class="primary-button" id="saveConnectionButton" value="default">保存并连接</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="createAppDialog">
+    <form method="dialog" class="dialog-form" id="createAppForm">
+      <div class="dialog-header">
+        <h2>新建工作流应用</h2>
+        <button class="icon-button" value="cancel" aria-label="关闭" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <label class="field">
+        <span>名称</span>
+        <input id="createAppName" type="text" maxlength="200" required>
+      </label>
+      <label class="field">
+        <span>描述</span>
+        <textarea id="createAppDescription" maxlength="2000"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" value="cancel">取消</button>
+        <button class="primary-button" id="confirmCreateApp" value="default">创建</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="addNodeDialog">
+    <form method="dialog" class="dialog-form" id="addNodeForm">
+      <div class="dialog-header">
+        <h2>添加节点</h2>
+        <button class="icon-button" value="cancel" aria-label="关闭" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <label class="field">
+        <span>类型</span>
+        <select id="newNodeType">
+          <option value="start">Start</option>
+          <option value="agent">Agent</option>
+          <option value="knowledge_retrieval">Knowledge Retrieval</option>
+          <option value="tool">Tool</option>
+          <option value="human_review">Human Review</option>
+          <option value="end">End</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>名称</span>
+        <input id="newNodeName" type="text" maxlength="200" required>
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" value="cancel">取消</button>
+        <button class="primary-button" id="confirmAddNode" value="default">添加</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="addEdgeDialog">
+    <form method="dialog" class="dialog-form" id="addEdgeForm">
+      <div class="dialog-header">
+        <h2>添加连线</h2>
+        <button class="icon-button" value="cancel" aria-label="关闭" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <label class="field">
+        <span>起点</span>
+        <select id="edgeSourceInput"></select>
+      </label>
+      <label class="field">
+        <span>终点</span>
+        <select id="edgeTargetInput"></select>
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" value="cancel">取消</button>
+        <button class="primary-button" id="confirmAddEdge" value="default">添加</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="publishDialog">
+    <form method="dialog" class="dialog-form" id="publishForm">
+      <div class="dialog-header">
+        <h2>发布版本</h2>
+        <button class="icon-button" value="cancel" aria-label="关闭" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <label class="field">
+        <span>发布者</span>
+        <input id="publisherInput" type="text" value="console" required>
+      </label>
+      <label class="field">
+        <span>发布说明</span>
+        <textarea id="releaseNotesInput" maxlength="4000"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" value="cancel">取消</button>
+        <button class="primary-button" id="confirmPublish" value="default">发布</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="runDialog">
+    <form method="dialog" class="dialog-form wide-dialog" id="runForm">
+      <div class="dialog-header">
+        <div>
+          <h2>运行工作流</h2>
+          <span id="runTargetLabel">当前草稿</span>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="关闭" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <label class="field">
+        <span>输入 JSON</span>
+        <textarea id="runInputsInput" spellcheck="false">{}</textarea>
+      </label>
+      <label class="field">
+        <span>发起者</span>
+        <input id="runRequestedBy" type="text" value="console" required>
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" value="cancel">取消</button>
+        <button class="primary-button" id="confirmRun" value="default">
+          <i data-lucide="play"></i>
+          运行
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="decisionDialog">
+    <form method="dialog" class="dialog-form" id="decisionForm">
+      <div class="dialog-header">
+        <h2 id="decisionTitle">审批</h2>
+        <button class="icon-button" value="cancel" aria-label="关闭" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <label class="field">
+        <span>审批人</span>
+        <input id="decisionReviewer" type="text" value="console-reviewer" required>
+      </label>
+      <label class="field">
+        <span>原因</span>
+        <textarea id="decisionReason" maxlength="1000"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" value="cancel">取消</button>
+        <button class="primary-button" id="confirmDecision" value="default">确认</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="rollbackDialog">
+    <form method="dialog" class="dialog-form" id="rollbackForm">
+      <div class="dialog-header">
+        <h2>恢复历史版本</h2>
+        <button class="icon-button" value="cancel" aria-label="关闭" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="callout warning" id="rollbackTarget"></div>
+      <label class="field">
+        <span>操作者</span>
+        <input id="rollbackRequestedBy" type="text" value="console" required>
+      </label>
+      <label class="field">
+        <span>原因</span>
+        <textarea id="rollbackReason" maxlength="2000"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button class="secondary-button" value="cancel">取消</button>
+        <button class="danger-button" id="confirmRollback" value="default">恢复到草稿</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="runDetailDialog" class="detail-dialog">
+    <div class="detail-sheet">
+      <div class="dialog-header detail-header">
+        <div>
+          <h2>运行详情</h2>
+          <span class="mono" id="runDetailId"></span>
+        </div>
+        <button class="icon-button" id="closeRunDetailButton" type="button" aria-label="关闭" title="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="run-detail-summary" id="runDetailSummary"></div>
+      <section class="detail-section">
+        <h3>审批</h3>
+        <div id="runReviews"></div>
+      </section>
+      <section class="detail-section">
+        <h3>节点时间线</h3>
+        <div class="timeline" id="runTimeline"></div>
+      </section>
+      <section class="detail-section">
+        <h3>输出</h3>
+        <pre id="runOutput"></pre>
+      </section>
+    </div>
+  </dialog>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+</body>
+</html>

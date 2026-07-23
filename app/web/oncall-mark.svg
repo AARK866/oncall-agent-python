@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title">
+  <title id="title">OnCall Agent</title>
+  <rect width="48" height="48" rx="8" fill="#18201d"/>
+  <path d="M8 25h8l3-10 6 21 4-15 3 4h8" fill="none" stroke="#4fd19a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="39" cy="11" r="4" fill="#f0a640"/>
+</svg>

@@ -6,6 +6,7 @@ Useful commands:
 
 ```powershell
 python -m uvicorn app.main:app --reload
+python scripts/check_workflow_console.py
 python scripts/check_llm_client.py
 python scripts/check_enterprise_stack.py
 python scripts/check_real_incident_flow.py --mock-llm
@@ -18,6 +19,9 @@ python scripts/run_acceptance.py
 docker compose up --build api
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+After starting FastAPI, open the workflow management console at
+`http://127.0.0.1:8000/console`.
 
 Docs:
 
@@ -47,6 +51,7 @@ Docs:
 - Workflow validation and LangGraph runtime: `docs/workflow-validation-runtime.md`
 - Workflow publishing, immutable versions, and rollback: `docs/workflow-versioning.md`
 - Workflow observability, persisted review, and audit: `docs/workflow-observability-review.md`
+- Workflow management console: `docs/workflow-console.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
 - Security and production: `docs/security-production.md`
 - Tools health API: `docs/tools-health-api.md`
