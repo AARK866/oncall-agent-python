@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -28,6 +27,12 @@ from app.schemas import (
     WorkflowRunStatus,
     WorkflowVersionRecord,
 )
+from app.storage.database import (
+    Database,
+    DatabaseConnection,
+    DatabaseRow,
+    configured_database_target,
+)
 
 
 class WorkflowRevisionConflict(ValueError):
@@ -48,16 +53,25 @@ class WorkflowReviewConflict(ValueError):
 
 
 class SQLiteWorkflowStore:
-    """Persistent control-plane state for workflow applications and versions."""
+    """Workflow control-plane repository backed by the configured database."""
 
-    def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        auto_create_schema: bool = True,
+    ) -> None:
+        self.db_path = db_path
+        self.database = Database(db_path)
+        if auto_create_schema:
+            self._init_schema()
 
     @classmethod
     def from_settings(cls) -> "SQLiteWorkflowStore":
-        return cls(settings.workflow_db_path)
+        return cls(
+            configured_database_target(settings.workflow_db_path),
+            auto_create_schema=settings.database_auto_create_schema,
+        )
 
     def create_application(
         self,
@@ -227,7 +241,11 @@ class SQLiteWorkflowStore:
         now = datetime.utcnow()
         version_id = f"wfver_{uuid4().hex}"
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.acquire_write_lock(
+                "workflow_applications",
+                "app_id",
+                app_id,
+            )
             draft_row = connection.execute(
                 "SELECT * FROM workflow_drafts WHERE app_id = ?",
                 (app_id,),
@@ -348,7 +366,11 @@ class SQLiteWorkflowStore:
     ) -> tuple[WorkflowVersionRecord, WorkflowDraftRecord]:
         now = datetime.utcnow().isoformat()
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.acquire_write_lock(
+                "workflow_applications",
+                "app_id",
+                app_id,
+            )
             version_row = connection.execute(
                 """
                 SELECT * FROM workflow_versions
@@ -572,7 +594,7 @@ class SQLiteWorkflowStore:
                 """
                 SELECT * FROM workflow_run_events
                 WHERE run_id = ?
-                ORDER BY created_at ASC, rowid ASC
+                ORDER BY created_at ASC, event_id ASC
                 """,
                 (run_id,),
             ).fetchall()
@@ -931,7 +953,7 @@ class SQLiteWorkflowStore:
                 """
                 SELECT * FROM workflow_audit_events
                 WHERE app_id = ?
-                ORDER BY created_at DESC, rowid DESC
+                ORDER BY created_at DESC, audit_id DESC
                 LIMIT ?
                 """,
                 (app_id, limit),
@@ -1152,14 +1174,11 @@ class SQLiteWorkflowStore:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+    def _connect(self) -> DatabaseConnection:
+        return self.database.connect()
 
 
-def _application_from_row(row: sqlite3.Row) -> WorkflowApplicationRecord:
+def _application_from_row(row: DatabaseRow) -> WorkflowApplicationRecord:
     return WorkflowApplicationRecord(
         app_id=row["app_id"],
         name=row["name"],
@@ -1170,7 +1189,7 @@ def _application_from_row(row: sqlite3.Row) -> WorkflowApplicationRecord:
     )
 
 
-def _draft_from_row(row: sqlite3.Row) -> WorkflowDraftRecord:
+def _draft_from_row(row: DatabaseRow) -> WorkflowDraftRecord:
     return WorkflowDraftRecord(
         draft_id=row["draft_id"],
         app_id=row["app_id"],
@@ -1181,7 +1200,7 @@ def _draft_from_row(row: sqlite3.Row) -> WorkflowDraftRecord:
     )
 
 
-def _version_from_row(row: sqlite3.Row) -> WorkflowVersionRecord:
+def _version_from_row(row: DatabaseRow) -> WorkflowVersionRecord:
     return WorkflowVersionRecord(
         version_id=row["version_id"],
         app_id=row["app_id"],
@@ -1204,7 +1223,7 @@ def _canonical_graph_json(graph: WorkflowGraphDefinition) -> str:
     )
 
 
-def _run_from_row(row: sqlite3.Row) -> WorkflowRunRecord:
+def _run_from_row(row: DatabaseRow) -> WorkflowRunRecord:
     return WorkflowRunRecord(
         run_id=row["run_id"],
         app_id=row["app_id"],
@@ -1229,7 +1248,7 @@ def _run_from_row(row: sqlite3.Row) -> WorkflowRunRecord:
 
 
 def _insert_run_event(
-    connection: sqlite3.Connection,
+    connection: DatabaseConnection,
     run_id: str,
     event_type: WorkflowRunEventType,
     message: str,
@@ -1265,7 +1284,7 @@ def _insert_run_event(
     return event
 
 
-def _run_event_from_row(row: sqlite3.Row) -> WorkflowRunEventRecord:
+def _run_event_from_row(row: DatabaseRow) -> WorkflowRunEventRecord:
     return WorkflowRunEventRecord(
         event_id=row["event_id"],
         run_id=row["run_id"],
@@ -1277,7 +1296,7 @@ def _run_event_from_row(row: sqlite3.Row) -> WorkflowRunEventRecord:
     )
 
 
-def _review_from_row(row: sqlite3.Row) -> WorkflowReviewRequestRecord:
+def _review_from_row(row: DatabaseRow) -> WorkflowReviewRequestRecord:
     return WorkflowReviewRequestRecord(
         review_id=row["review_id"],
         run_id=row["run_id"],
@@ -1294,7 +1313,7 @@ def _review_from_row(row: sqlite3.Row) -> WorkflowReviewRequestRecord:
 
 
 def _insert_audit_event(
-    connection: sqlite3.Connection,
+    connection: DatabaseConnection,
     app_id: str,
     actor: str,
     action: str,
@@ -1334,7 +1353,7 @@ def _insert_audit_event(
     return event
 
 
-def _audit_event_from_row(row: sqlite3.Row) -> WorkflowAuditEventRecord:
+def _audit_event_from_row(row: DatabaseRow) -> WorkflowAuditEventRecord:
     return WorkflowAuditEventRecord(
         audit_id=row["audit_id"],
         app_id=row["app_id"],

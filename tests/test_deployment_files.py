@@ -31,6 +31,9 @@ def test_docker_compose_defines_api_and_optional_milvus_profile() -> None:
     assert "profiles:" in compose
     assert "milvus" in compose
     assert "oncall-data" in compose
+    assert "postgres:" in compose
+    assert "DATABASE_URL:" in compose
+    assert 'DATABASE_AUTO_CREATE_SCHEMA: "false"' in compose
 
 
 def test_github_actions_runs_tests_and_docker_build() -> None:

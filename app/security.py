@@ -93,6 +93,10 @@ def validate_production_security() -> list[str]:
         missing.append("API_TOKEN")
     if not settings.webhook_secret:
         missing.append("WEBHOOK_SECRET")
+    if not settings.database_url:
+        missing.append("DATABASE_URL")
+    if settings.database_auto_create_schema:
+        missing.append("DATABASE_AUTO_CREATE_SCHEMA=false")
     return sorted(set(missing))
 
 
@@ -131,6 +135,7 @@ def _configured_secrets() -> list[str]:
         for secret in [
             settings.api_token,
             settings.webhook_secret,
+            settings.database_url,
             settings.llm_api_key,
             settings.embedding_api_key,
             settings.github_token,

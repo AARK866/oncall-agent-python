@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     api_token_roles: str = "oncall,sre"
     webhook_secret: str | None = None
     require_auth_in_production: bool = True
+    database_url: str | None = None
+    database_pool_size: int = 10
+    database_max_overflow: int = 20
+    database_pool_timeout_seconds: int = 30
+    database_pool_recycle_seconds: int = 1800
+    database_auto_create_schema: bool = True
     llm_provider: str = "mock"
     llm_model: str = "mock-oncall-agent"
     llm_api_key: str | None = None

@@ -1,5 +1,4 @@
 import json
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,19 +16,34 @@ from app.schemas import (
     SourceDocument,
     ToolResult,
 )
+from app.storage.database import (
+    Database,
+    DatabaseConnection,
+    DatabaseRow,
+    configured_database_target,
+)
 
 
 class SQLiteIncidentStore:
-    """Local incident history storage backed by SQLite."""
+    """Incident repository backed by the configured SQLAlchemy database."""
 
-    def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        auto_create_schema: bool = True,
+    ) -> None:
+        self.db_path = db_path
+        self.database = Database(db_path)
+        if auto_create_schema:
+            self._init_schema()
 
     @classmethod
     def from_settings(cls) -> "SQLiteIncidentStore":
-        return cls(settings.incident_db_path)
+        return cls(
+            configured_database_target(settings.incident_db_path),
+            auto_create_schema=settings.database_auto_create_schema,
+        )
 
     def create_incident(
         self,
@@ -200,13 +214,11 @@ class SQLiteIncidentStore:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connect(self) -> DatabaseConnection:
+        return self.database.connect()
 
 
-def _incident_from_row(row: sqlite3.Row) -> IncidentRecord:
+def _incident_from_row(row: DatabaseRow) -> IncidentRecord:
     return IncidentRecord(
         incident_id=row["incident_id"],
         title=row["title"],
@@ -221,7 +233,7 @@ def _incident_from_row(row: sqlite3.Row) -> IncidentRecord:
     )
 
 
-def _diagnosis_from_row(row: sqlite3.Row) -> DiagnosisRecord:
+def _diagnosis_from_row(row: DatabaseRow) -> DiagnosisRecord:
     plan_trace_data = _json_loads(row["plan_trace_json"], None)
     return DiagnosisRecord(
         diagnosis_id=row["diagnosis_id"],

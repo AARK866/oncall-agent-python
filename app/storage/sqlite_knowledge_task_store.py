@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -16,19 +15,34 @@ from app.schemas import (
     KnowledgeIngestionTaskRecord,
     KnowledgeIngestionTaskStatus,
 )
+from app.storage.database import (
+    Database,
+    DatabaseConnection,
+    DatabaseRow,
+    configured_database_target,
+)
 
 
 class SQLiteKnowledgeTaskStore:
-    """Persistent state for asynchronous knowledge ingestion tasks."""
+    """Knowledge task repository backed by the configured database."""
 
-    def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        auto_create_schema: bool = True,
+    ) -> None:
+        self.db_path = db_path
+        self.database = Database(db_path)
+        if auto_create_schema:
+            self._init_schema()
 
     @classmethod
     def from_settings(cls) -> "SQLiteKnowledgeTaskStore":
-        return cls(settings.knowledge_ingestion_task_db_path)
+        return cls(
+            configured_database_target(settings.knowledge_ingestion_task_db_path),
+            auto_create_schema=settings.database_auto_create_schema,
+        )
 
     def create_task(self, request: KnowledgeIngestRequest) -> KnowledgeIngestionTaskRecord:
         now = datetime.utcnow()
@@ -384,10 +398,8 @@ class SQLiteKnowledgeTaskStore:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connect(self) -> DatabaseConnection:
+        return self.database.connect()
 
 
 def _task_values(task: KnowledgeIngestionTaskRecord) -> tuple:
@@ -407,7 +419,7 @@ def _task_values(task: KnowledgeIngestionTaskRecord) -> tuple:
     )
 
 
-def _task_from_row(row: sqlite3.Row) -> KnowledgeIngestionTaskRecord:
+def _task_from_row(row: DatabaseRow) -> KnowledgeIngestionTaskRecord:
     result_json = row["result_json"]
     return KnowledgeIngestionTaskRecord(
         task_id=row["task_id"],
@@ -437,7 +449,7 @@ def _task_from_row(row: sqlite3.Row) -> KnowledgeIngestionTaskRecord:
     )
 
 
-def _attempt_from_row(row: sqlite3.Row) -> KnowledgeIngestionAttemptRecord:
+def _attempt_from_row(row: DatabaseRow) -> KnowledgeIngestionAttemptRecord:
     result_json = row["result_json"]
     return KnowledgeIngestionAttemptRecord(
         task_id=row["task_id"],

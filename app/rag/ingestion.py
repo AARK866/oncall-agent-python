@@ -127,8 +127,8 @@ class KnowledgeIngestionPipeline:
         full_rebuild: bool,
         progress_callback: Callable[[str, int], None] | None,
     ) -> KnowledgeIngestResponse:
-        manifest_store = self.manifest_store or SQLiteKnowledgeManifestStore(
-            settings.knowledge_manifest_db_path
+        manifest_store = (
+            self.manifest_store or SQLiteKnowledgeManifestStore.from_settings()
         )
         namespace = build_index_namespace(
             source=ingest_source,

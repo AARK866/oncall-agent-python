@@ -1,3 +1,4 @@
+from app.storage.database import Database
 from app.storage.sqlite_incident_store import SQLiteIncidentStore
 from app.storage.sqlite_knowledge_manifest_store import (
     KnowledgeManifestRecord,
@@ -13,13 +14,25 @@ from app.storage.sqlite_workflow_store import (
     WorkflowRunStateConflict,
 )
 
+IncidentStore = SQLiteIncidentStore
+KnowledgeManifestStore = SQLiteKnowledgeManifestStore
+KnowledgeTaskStore = SQLiteKnowledgeTaskStore
+TaskStore = SQLiteTaskStore
+WorkflowStore = SQLiteWorkflowStore
+
 __all__ = [
+    "Database",
+    "IncidentStore",
     "KnowledgeManifestRecord",
+    "KnowledgeManifestStore",
+    "KnowledgeTaskStore",
     "SQLiteIncidentStore",
     "SQLiteKnowledgeManifestStore",
     "SQLiteKnowledgeTaskStore",
     "SQLiteTaskStore",
     "SQLiteWorkflowStore",
+    "TaskStore",
+    "WorkflowStore",
     "WorkflowReviewConflict",
     "WorkflowRevisionConflict",
     "WorkflowRunStateConflict",

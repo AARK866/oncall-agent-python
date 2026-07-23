@@ -1,5 +1,4 @@
 import json
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,19 +18,34 @@ from app.schemas import (
     HumanReviewStatus,
     OpsGraphCheckpointRecord,
 )
+from app.storage.database import (
+    Database,
+    DatabaseConnection,
+    DatabaseRow,
+    configured_database_target,
+)
 
 
 class SQLiteTaskStore:
-    """Persistent diagnosis task queue state backed by SQLite."""
+    """Diagnosis task repository backed by the configured database."""
 
-    def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        auto_create_schema: bool = True,
+    ) -> None:
+        self.db_path = db_path
+        self.database = Database(db_path)
+        if auto_create_schema:
+            self._init_schema()
 
     @classmethod
     def from_settings(cls) -> "SQLiteTaskStore":
-        return cls(settings.incident_db_path)
+        return cls(
+            configured_database_target(settings.incident_db_path),
+            auto_create_schema=settings.database_auto_create_schema,
+        )
 
     def create_task(
         self,
@@ -958,10 +972,8 @@ class SQLiteTaskStore:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connect(self) -> DatabaseConnection:
+        return self.database.connect()
 
 
 def _task_values(task: DiagnosisTaskRecord) -> tuple[Any, ...]:
@@ -1054,7 +1066,7 @@ def _human_review_values(review: HumanReviewRequestRecord) -> tuple[Any, ...]:
     )
 
 
-def _task_from_row(row: sqlite3.Row) -> DiagnosisTaskRecord:
+def _task_from_row(row: DatabaseRow) -> DiagnosisTaskRecord:
     result_data = _json_loads(row["result_json"], None)
     return DiagnosisTaskRecord(
         task_id=row["task_id"],
@@ -1082,7 +1094,7 @@ def _task_from_row(row: sqlite3.Row) -> DiagnosisTaskRecord:
     )
 
 
-def _alert_group_from_row(row: sqlite3.Row) -> AlertGroupRecord:
+def _alert_group_from_row(row: DatabaseRow) -> AlertGroupRecord:
     return AlertGroupRecord(
         group_id=row["group_id"],
         dedupe_key=row["dedupe_key"],
@@ -1104,7 +1116,7 @@ def _alert_group_from_row(row: sqlite3.Row) -> AlertGroupRecord:
     )
 
 
-def _event_from_row(row: sqlite3.Row) -> DiagnosisTaskEventRecord:
+def _event_from_row(row: DatabaseRow) -> DiagnosisTaskEventRecord:
     return DiagnosisTaskEventRecord(
         event_id=row["event_id"],
         task_id=row["task_id"],
@@ -1115,7 +1127,7 @@ def _event_from_row(row: sqlite3.Row) -> DiagnosisTaskEventRecord:
     )
 
 
-def _checkpoint_from_row(row: sqlite3.Row) -> OpsGraphCheckpointRecord:
+def _checkpoint_from_row(row: DatabaseRow) -> OpsGraphCheckpointRecord:
     return OpsGraphCheckpointRecord(
         checkpoint_id=row["checkpoint_id"],
         task_id=row["task_id"],
@@ -1129,7 +1141,7 @@ def _checkpoint_from_row(row: sqlite3.Row) -> OpsGraphCheckpointRecord:
     )
 
 
-def _human_review_from_row(row: sqlite3.Row) -> HumanReviewRequestRecord:
+def _human_review_from_row(row: DatabaseRow) -> HumanReviewRequestRecord:
     return HumanReviewRequestRecord(
         review_id=row["review_id"],
         task_id=row["task_id"],
@@ -1146,15 +1158,12 @@ def _human_review_from_row(row: sqlite3.Row) -> HumanReviewRequestRecord:
 
 
 def _ensure_column(
-    connection: sqlite3.Connection,
+    connection: DatabaseConnection,
     table_name: str,
     column_name: str,
     column_definition: str,
 ) -> None:
-    columns = {
-        row["name"]
-        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
-    }
+    columns = connection.column_names(table_name)
     if column_name not in columns:
         connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
 

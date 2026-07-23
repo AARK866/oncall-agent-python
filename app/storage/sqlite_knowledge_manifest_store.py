@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from app.config import settings
+from app.storage.database import (
+    Database,
+    DatabaseConnection,
+    DatabaseRow,
+    configured_database_target,
+)
 
 
 @dataclass(frozen=True)
@@ -21,12 +28,25 @@ class KnowledgeManifestRecord:
 
 
 class SQLiteKnowledgeManifestStore:
-    """Persistent source-of-truth for incremental knowledge indexing."""
+    """Knowledge manifest repository backed by the configured database."""
 
-    def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        auto_create_schema: bool = True,
+    ) -> None:
+        self.db_path = db_path
+        self.database = Database(db_path)
+        if auto_create_schema:
+            self._init_schema()
+
+    @classmethod
+    def from_settings(cls) -> "SQLiteKnowledgeManifestStore":
+        return cls(
+            configured_database_target(settings.knowledge_manifest_db_path),
+            auto_create_schema=settings.database_auto_create_schema,
+        )
 
     def list_records(self, namespace: str) -> dict[str, KnowledgeManifestRecord]:
         with self._connect() as connection:
@@ -107,10 +127,8 @@ class SQLiteKnowledgeManifestStore:
                 """
             )
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connect(self) -> DatabaseConnection:
+        return self.database.connect()
 
 
 def new_manifest_record(
@@ -136,7 +154,7 @@ def new_manifest_record(
     )
 
 
-def _record_from_row(row: sqlite3.Row) -> KnowledgeManifestRecord:
+def _record_from_row(row: DatabaseRow) -> KnowledgeManifestRecord:
     return KnowledgeManifestRecord(
         namespace=row["namespace"],
         doc_id=row["doc_id"],
