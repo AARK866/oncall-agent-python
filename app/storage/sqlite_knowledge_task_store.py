@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,6 +11,8 @@ from app.config import settings
 from app.schemas import (
     KnowledgeIngestRequest,
     KnowledgeIngestResponse,
+    KnowledgeIngestionAttemptRecord,
+    KnowledgeIngestionMetricsResponse,
     KnowledgeIngestionTaskRecord,
     KnowledgeIngestionTaskStatus,
 )
@@ -51,7 +54,7 @@ class SQLiteKnowledgeTaskStore:
         return task
 
     def claim(self, task_id: str) -> KnowledgeIngestionTaskRecord | None:
-        now = datetime.utcnow().isoformat()
+        now = datetime.utcnow()
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -65,14 +68,34 @@ class SQLiteKnowledgeTaskStore:
                     KnowledgeIngestionTaskStatus.running.value,
                     "starting",
                     5,
-                    now,
-                    now,
+                    now.isoformat(),
+                    now.isoformat(),
                     task_id,
                     KnowledgeIngestionTaskStatus.queued.value,
                 ),
             )
-        if cursor.rowcount == 0:
-            return None
+            if cursor.rowcount == 0:
+                return None
+            row = connection.execute(
+                "SELECT attempt FROM knowledge_ingestion_tasks WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()
+            connection.execute(
+                """
+                INSERT INTO knowledge_ingestion_attempts (
+                    task_id, attempt, status, progress_stage, result_json,
+                    error, elapsed_ms, started_at, finished_at
+                )
+                VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, NULL)
+                """,
+                (
+                    task_id,
+                    int(row["attempt"]),
+                    KnowledgeIngestionTaskStatus.running.value,
+                    "starting",
+                    now.isoformat(),
+                ),
+            )
         return self.require_task(task_id)
 
     def update_progress(self, task_id: str, stage: str, percent: int) -> None:
@@ -92,13 +115,25 @@ class SQLiteKnowledgeTaskStore:
                     KnowledgeIngestionTaskStatus.running.value,
                 ),
             )
+            connection.execute(
+                """
+                UPDATE knowledge_ingestion_attempts
+                SET progress_stage = ?
+                WHERE task_id = ? AND attempt = (
+                    SELECT attempt FROM knowledge_ingestion_tasks WHERE task_id = ?
+                )
+                """,
+                (stage, task_id, task_id),
+            )
 
     def mark_succeeded(
         self,
         task_id: str,
         result: KnowledgeIngestResponse,
     ) -> KnowledgeIngestionTaskRecord:
-        now = datetime.utcnow().isoformat()
+        task = self.require_task(task_id)
+        now = datetime.utcnow()
+        elapsed_ms = _elapsed_ms(task.started_at, now)
         with self._connect() as connection:
             connection.execute(
                 """
@@ -112,16 +147,36 @@ class SQLiteKnowledgeTaskStore:
                     "completed",
                     100,
                     result.model_dump_json(),
-                    now,
-                    now,
+                    now.isoformat(),
+                    now.isoformat(),
                     task_id,
                     KnowledgeIngestionTaskStatus.running.value,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE knowledge_ingestion_attempts
+                SET status = ?, progress_stage = ?, result_json = ?,
+                    error = NULL, elapsed_ms = ?, finished_at = ?
+                WHERE task_id = ? AND attempt = ?
+                """,
+                (
+                    KnowledgeIngestionTaskStatus.succeeded.value,
+                    "completed",
+                    result.model_dump_json(),
+                    elapsed_ms,
+                    now.isoformat(),
+                    task_id,
+                    task.attempt,
                 ),
             )
         return self.require_task(task_id)
 
     def mark_failed(self, task_id: str, error: str) -> KnowledgeIngestionTaskRecord:
-        now = datetime.utcnow().isoformat()
+        task = self.require_task(task_id)
+        now = datetime.utcnow()
+        elapsed_ms = _elapsed_ms(task.started_at, now)
+        normalized_error = error[:4000]
         with self._connect() as connection:
             connection.execute(
                 """
@@ -133,11 +188,28 @@ class SQLiteKnowledgeTaskStore:
                 (
                     KnowledgeIngestionTaskStatus.failed.value,
                     "failed",
-                    error[:4000],
-                    now,
-                    now,
+                    normalized_error,
+                    now.isoformat(),
+                    now.isoformat(),
                     task_id,
                     KnowledgeIngestionTaskStatus.running.value,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE knowledge_ingestion_attempts
+                SET status = ?, progress_stage = ?, error = ?,
+                    elapsed_ms = ?, finished_at = ?
+                WHERE task_id = ? AND attempt = ?
+                """,
+                (
+                    KnowledgeIngestionTaskStatus.failed.value,
+                    "failed",
+                    normalized_error,
+                    elapsed_ms,
+                    now.isoformat(),
+                    task_id,
+                    task.attempt,
                 ),
             )
         return self.require_task(task_id)
@@ -196,6 +268,72 @@ class SQLiteKnowledgeTaskStore:
             ).fetchall()
         return [_task_from_row(row) for row in rows]
 
+    def list_attempts(self, task_id: str) -> list[KnowledgeIngestionAttemptRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM knowledge_ingestion_attempts
+                WHERE task_id = ?
+                ORDER BY attempt ASC
+                """,
+                (task_id,),
+            ).fetchall()
+        return [_attempt_from_row(row) for row in rows]
+
+    def metrics(self, window_hours: int = 24) -> KnowledgeIngestionMetricsResponse:
+        cutoff = (datetime.utcnow() - timedelta(hours=window_hours)).isoformat()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM knowledge_ingestion_tasks
+                WHERE created_at >= ?
+                ORDER BY created_at ASC
+                """,
+                (cutoff,),
+            ).fetchall()
+        tasks = [_task_from_row(row) for row in rows]
+        by_status = {
+            status.value: sum(task.status == status for task in tasks)
+            for status in KnowledgeIngestionTaskStatus
+        }
+        terminal_count = by_status["succeeded"] + by_status["failed"]
+        durations = sorted(
+            _elapsed_ms(task.started_at, task.finished_at)
+            for task in tasks
+            if task.started_at is not None and task.finished_at is not None
+        )
+        results = [task.result for task in tasks if task.result is not None]
+        observability = [result.metadata.get("observability", {}) for result in results]
+        p95_index = max(0, math.ceil(len(durations) * 0.95) - 1)
+        return KnowledgeIngestionMetricsResponse(
+            window_hours=window_hours,
+            total_tasks=len(tasks),
+            by_status=by_status,
+            success_rate=(
+                round(by_status["succeeded"] / terminal_count, 4)
+                if terminal_count
+                else 0.0
+            ),
+            average_duration_ms=(
+                round(sum(durations) / len(durations), 2)
+                if durations
+                else None
+            ),
+            p95_duration_ms=durations[p95_index] if durations else None,
+            retried_tasks=sum(task.attempt > 1 for task in tasks),
+            total_attempts=sum(task.attempt for task in tasks),
+            documents_processed=sum(result.documents_loaded for result in results),
+            chunks_created=sum(result.chunks_created for result in results),
+            vectors_upserted=sum(
+                int(item.get("vectors_upserted", 0))
+                for item in observability
+            ),
+            stale_vectors_deleted=sum(
+                int(item.get("stale_vectors_deleted", 0))
+                for item in observability
+            ),
+        )
+
     def _init_schema(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -214,6 +352,29 @@ class SQLiteKnowledgeTaskStore:
                     started_at TEXT,
                     finished_at TEXT
                 )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS knowledge_ingestion_attempts (
+                    task_id TEXT NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    progress_stage TEXT NOT NULL,
+                    result_json TEXT,
+                    error TEXT,
+                    elapsed_ms INTEGER,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    PRIMARY KEY (task_id, attempt),
+                    FOREIGN KEY (task_id) REFERENCES knowledge_ingestion_tasks(task_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_knowledge_ingestion_attempts_status
+                ON knowledge_ingestion_attempts(status, started_at DESC)
                 """
             )
             connection.execute(
@@ -274,3 +435,32 @@ def _task_from_row(row: sqlite3.Row) -> KnowledgeIngestionTaskRecord:
             else None
         ),
     )
+
+
+def _attempt_from_row(row: sqlite3.Row) -> KnowledgeIngestionAttemptRecord:
+    result_json = row["result_json"]
+    return KnowledgeIngestionAttemptRecord(
+        task_id=row["task_id"],
+        attempt=int(row["attempt"]),
+        status=KnowledgeIngestionTaskStatus(row["status"]),
+        progress_stage=row["progress_stage"],
+        result=(
+            KnowledgeIngestResponse.model_validate(json.loads(result_json))
+            if result_json
+            else None
+        ),
+        error=row["error"],
+        elapsed_ms=int(row["elapsed_ms"]) if row["elapsed_ms"] is not None else None,
+        started_at=datetime.fromisoformat(row["started_at"]),
+        finished_at=(
+            datetime.fromisoformat(row["finished_at"])
+            if row["finished_at"]
+            else None
+        ),
+    )
+
+
+def _elapsed_ms(started_at: datetime | None, finished_at: datetime | None) -> int:
+    if started_at is None or finished_at is None:
+        return 0
+    return max(0, round((finished_at - started_at).total_seconds() * 1000))

@@ -40,6 +40,8 @@ def test_local_knowledge_ingestion_pipeline_loads_and_chunks_markdown(tmp_path) 
     assert result.chunks_created >= 1
     assert result.document_ids == ["payment.md"]
     assert result.metadata["persisted"] is False
+    assert result.metadata["observability"]["elapsed_ms"] >= 0
+    assert result.metadata["observability"]["vectors_upserted"] == result.chunks_created
 
 
 def test_github_knowledge_ingestion_pipeline_loads_markdown_recursively() -> None:

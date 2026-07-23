@@ -58,6 +58,17 @@ def test_failed_knowledge_ingestion_task_can_retry(tmp_path) -> None:
     assert succeeded.status == KnowledgeIngestionTaskStatus.succeeded
     assert succeeded.attempt == 2
     assert SQLiteKnowledgeTaskStore(tmp_path / "tasks.db").get_task(task.task_id) == succeeded
+    attempts = store.list_attempts(task.task_id)
+    assert [attempt.status.value for attempt in attempts] == ["failed", "succeeded"]
+    assert attempts[0].error == "RuntimeError: temporary embedding failure"
+    assert attempts[1].result is not None
+
+    metrics = store.metrics(window_hours=24)
+    assert metrics.total_tasks == 1
+    assert metrics.total_attempts == 2
+    assert metrics.retried_tasks == 1
+    assert metrics.success_rate == 1.0
+    assert metrics.documents_processed == 2
 
 
 def test_knowledge_ingestion_retry_limit_is_enforced(tmp_path, monkeypatch) -> None:
@@ -103,9 +114,25 @@ def test_knowledge_ingestion_task_api_runs_and_exposes_status(
     assert task["progress_percent"] == 100
     assert task["result"]["documents_loaded"] == 1
 
+    attempts_response = client.get(
+        f"/api/knowledge/ingestion-tasks/{task_id}/attempts"
+    )
+    assert attempts_response.status_code == 200
+    assert attempts_response.json()[0]["status"] == "succeeded"
+
     list_response = client.get("/api/knowledge/ingestion-tasks")
     assert list_response.status_code == 200
     assert list_response.json()[0]["task_id"] == task_id
+
+    metrics_response = client.get(
+        "/api/knowledge/ingestion-metrics",
+        params={"window_hours": 24},
+    )
+    assert metrics_response.status_code == 200
+    metrics = metrics_response.json()
+    assert metrics["total_tasks"] == 1
+    assert metrics["by_status"]["succeeded"] == 1
+    assert metrics["documents_processed"] == 1
 
 
 class SuccessfulPipeline:

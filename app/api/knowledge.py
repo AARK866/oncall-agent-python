@@ -8,6 +8,8 @@ from app.schemas import (
     KnowledgeDocumentSummary,
     KnowledgeIngestRequest,
     KnowledgeIngestResponse,
+    KnowledgeIngestionAttemptRecord,
+    KnowledgeIngestionMetricsResponse,
     KnowledgeIngestionRetryRequest,
     KnowledgeIngestionTaskRecord,
     KnowledgeSearchRequest,
@@ -125,6 +127,17 @@ async def list_knowledge_ingestion_tasks(
 
 
 @router.get(
+    "/ingestion-metrics",
+    response_model=KnowledgeIngestionMetricsResponse,
+)
+async def get_knowledge_ingestion_metrics(
+    window_hours: int = Query(default=24, ge=1, le=720),
+    _: None = Depends(require_api_token),
+) -> KnowledgeIngestionMetricsResponse:
+    return _ingestion_queue().metrics(window_hours=window_hours)
+
+
+@router.get(
     "/ingestion-tasks/{task_id}",
     response_model=KnowledgeIngestionTaskRecord,
 )
@@ -136,6 +149,23 @@ async def get_knowledge_ingestion_task(
     if task is None:
         raise HTTPException(status_code=404, detail="Knowledge ingestion task not found")
     return task
+
+
+@router.get(
+    "/ingestion-tasks/{task_id}/attempts",
+    response_model=list[KnowledgeIngestionAttemptRecord],
+)
+async def get_knowledge_ingestion_attempts(
+    task_id: str,
+    _: None = Depends(require_api_token),
+) -> list[KnowledgeIngestionAttemptRecord]:
+    try:
+        return _ingestion_queue().attempts(task_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge ingestion task not found",
+        ) from None
 
 
 @router.post(

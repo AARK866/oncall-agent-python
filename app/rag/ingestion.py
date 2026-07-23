@@ -1,6 +1,7 @@
 import base64
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from time import perf_counter
 from typing import Any, Callable
 
 from app.config import settings
@@ -52,6 +53,7 @@ class KnowledgeIngestionPipeline:
         full_rebuild: bool = False,
         progress_callback: Callable[[str, int], None] | None = None,
     ) -> KnowledgeIngestResponse:
+        started_at = perf_counter()
         ingest_source = _ingest_source(source or settings.knowledge_source)
         source_path = path or _default_path(ingest_source)
         _report_progress(progress_callback, "loading_documents", 10)
@@ -65,14 +67,17 @@ class KnowledgeIngestionPipeline:
             else settings.knowledge_ingest_chunk_overlap
         )
         if self._incremental_indexing_enabled():
-            return self._ingest_incrementally(
-                ingest_source=ingest_source,
-                source_path=source_path,
-                documents=documents,
-                chunk_size=resolved_chunk_size,
-                chunk_overlap=resolved_chunk_overlap,
-                full_rebuild=full_rebuild,
-                progress_callback=progress_callback,
+            return _with_observability(
+                self._ingest_incrementally(
+                    ingest_source=ingest_source,
+                    source_path=source_path,
+                    documents=documents,
+                    chunk_size=resolved_chunk_size,
+                    chunk_overlap=resolved_chunk_overlap,
+                    full_rebuild=full_rebuild,
+                    progress_callback=progress_callback,
+                ),
+                started_at,
             )
 
         chunks = split_documents(
@@ -85,28 +90,31 @@ class KnowledgeIngestionPipeline:
         store_metadata = self._upsert_chunks(chunks)
         _report_progress(progress_callback, "vectors_persisted", 90)
 
-        return KnowledgeIngestResponse(
-            status="ok",
-            source=ingest_source,
-            path=source_path,
-            documents_loaded=len(documents),
-            chunks_created=len(chunks),
-            vector_store=settings.knowledge_vector_store,
-            collection_name=store_metadata.get("collection_name"),
-            document_ids=[document.doc_id for document in documents],
-            metadata={
-                **engine_metadata,
-                **store_metadata,
-                "embedding_provider": settings.embedding_provider,
-                "embedding_model": settings.embedding_model,
-                "embedding_dimensions": settings.embedding_dimensions,
-                "documents": _document_metadata_summary(documents),
-                "incremental": {
-                    "enabled": False,
-                    "mode": "full",
-                    "reason": "requires persistent Milvus and incremental indexing enabled",
+        return _with_observability(
+            KnowledgeIngestResponse(
+                status="ok",
+                source=ingest_source,
+                path=source_path,
+                documents_loaded=len(documents),
+                chunks_created=len(chunks),
+                vector_store=settings.knowledge_vector_store,
+                collection_name=store_metadata.get("collection_name"),
+                document_ids=[document.doc_id for document in documents],
+                metadata={
+                    **engine_metadata,
+                    **store_metadata,
+                    "embedding_provider": settings.embedding_provider,
+                    "embedding_model": settings.embedding_model,
+                    "embedding_dimensions": settings.embedding_dimensions,
+                    "documents": _document_metadata_summary(documents),
+                    "incremental": {
+                        "enabled": False,
+                        "mode": "full",
+                        "reason": "requires persistent Milvus and incremental indexing enabled",
+                    },
                 },
-            },
+            ),
+            started_at,
         )
 
     def _ingest_incrementally(
@@ -392,3 +400,36 @@ def _report_progress(
 ) -> None:
     if callback is not None:
         callback(stage, percent)
+
+
+def _with_observability(
+    response: KnowledgeIngestResponse,
+    started_at: float,
+) -> KnowledgeIngestResponse:
+    elapsed_ms = max(0, round((perf_counter() - started_at) * 1000))
+    elapsed_seconds = max(elapsed_ms / 1000, 0.001)
+    incremental = response.metadata.get("incremental", {})
+    return response.model_copy(
+        update={
+            "metadata": {
+                **response.metadata,
+                "observability": {
+                    "elapsed_ms": elapsed_ms,
+                    "documents_per_second": round(
+                        response.documents_loaded / elapsed_seconds,
+                        2,
+                    ),
+                    "chunks_per_second": round(
+                        response.chunks_created / elapsed_seconds,
+                        2,
+                    ),
+                    "vectors_upserted": int(
+                        incremental.get("upserted_chunks", response.chunks_created)
+                    ),
+                    "stale_vectors_deleted": int(
+                        incremental.get("deleted_chunks", 0)
+                    ),
+                },
+            }
+        }
+    )

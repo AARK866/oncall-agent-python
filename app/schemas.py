@@ -187,6 +187,34 @@ class KnowledgeIngestionTaskRecord(BaseModel):
     finished_at: datetime | None = None
 
 
+class KnowledgeIngestionAttemptRecord(BaseModel):
+    task_id: str
+    attempt: int = Field(ge=1)
+    status: KnowledgeIngestionTaskStatus
+    progress_stage: str
+    result: KnowledgeIngestResponse | None = None
+    error: str | None = None
+    elapsed_ms: int | None = Field(default=None, ge=0)
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
+class KnowledgeIngestionMetricsResponse(BaseModel):
+    window_hours: int
+    total_tasks: int
+    by_status: dict[str, int] = Field(default_factory=dict)
+    success_rate: float = Field(ge=0.0, le=1.0)
+    average_duration_ms: float | None = None
+    p95_duration_ms: int | None = None
+    retried_tasks: int = 0
+    total_attempts: int = 0
+    documents_processed: int = 0
+    chunks_created: int = 0
+    vectors_upserted: int = 0
+    stale_vectors_deleted: int = 0
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class KnowledgeIngestionRetryRequest(BaseModel):
     requested_by: str = Field(default="manual", min_length=1, max_length=120)
 

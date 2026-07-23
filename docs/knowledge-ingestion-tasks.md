@@ -60,3 +60,6 @@ The existing `POST /api/knowledge/ingest` endpoint remains available for short,
 synchronous imports. FastAPI background execution is the local runtime; the
 persistent queue boundary allows a later Celery, Dramatiq, or cloud worker to
 claim the same task contract without changing the API.
+
+Attempt-level audit records and aggregate metrics are documented in
+`docs/knowledge-observability.md`.

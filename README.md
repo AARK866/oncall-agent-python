@@ -12,6 +12,7 @@ python scripts/check_real_incident_flow.py --mock-llm
 python scripts/check_real_api_flow.py --in-process --mock-llm
 python scripts/check_alert_webhook.py --in-process --mock-llm
 python scripts/ingest_knowledge.py --source local --path app/data/runbooks
+python scripts/check_real_knowledge_pipeline.py
 python scripts/evaluate_rag.py --local-safe
 python scripts/run_acceptance.py
 docker compose up --build api
@@ -41,6 +42,7 @@ Docs:
 - Knowledge ACL: `docs/knowledge-acl.md`
 - Incremental knowledge indexing: `docs/incremental-indexing.md`
 - Knowledge ingestion tasks: `docs/knowledge-ingestion-tasks.md`
+- Knowledge ingestion observability: `docs/knowledge-observability.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
 - Security and production: `docs/security-production.md`
 - Tools health API: `docs/tools-health-api.md`
