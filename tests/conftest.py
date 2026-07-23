@@ -38,6 +38,12 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(settings, "knowledge_ingestion_max_attempts", 3)
     monkeypatch.setattr(settings, "workflow_db_path", "app/data/workflows.db")
+    monkeypatch.setattr(settings, "workflow_checkpointer", "memory")
+    monkeypatch.setattr(
+        settings,
+        "workflow_checkpoint_db_path",
+        "app/data/workflow_langgraph_checkpoints.sqlite",
+    )
     monkeypatch.setattr(settings, "ops_tool_mode", "mock")
     monkeypatch.setattr(settings, "prometheus_base_url", None)
     monkeypatch.setattr(settings, "loki_base_url", None)

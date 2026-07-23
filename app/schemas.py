@@ -352,11 +352,15 @@ class WorkflowValidationReport(BaseModel):
 class WorkflowDraftRunRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     thread_id: str | None = Field(default=None, max_length=200)
+    requested_by: str = Field(default="manual", min_length=1, max_length=120)
 
 
 class WorkflowRunStatus(str, Enum):
+    running = "running"
     succeeded = "succeeded"
     waiting_review = "waiting_review"
+    rejected = "rejected"
+    failed = "failed"
 
 
 class WorkflowExecutionSource(str, Enum):
@@ -364,11 +368,32 @@ class WorkflowExecutionSource(str, Enum):
     published = "published"
 
 
+class WorkflowRunEventType(str, Enum):
+    run_started = "run_started"
+    node_started = "node_started"
+    node_completed = "node_completed"
+    node_paused = "node_paused"
+    node_failed = "node_failed"
+    review_requested = "review_requested"
+    review_approved = "review_approved"
+    review_rejected = "review_rejected"
+    run_succeeded = "run_succeeded"
+    run_rejected = "run_rejected"
+    run_failed = "run_failed"
+
+
+class WorkflowReviewStatus(str, Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class WorkflowDraftRunResponse(BaseModel):
     app_id: str
     draft_revision: int
     thread_id: str
     status: WorkflowRunStatus
+    run_id: str | None = None
     execution_source: WorkflowExecutionSource = WorkflowExecutionSource.draft
     version_number: int | None = Field(default=None, ge=1)
     output: Any = None
@@ -376,6 +401,74 @@ class WorkflowDraftRunResponse(BaseModel):
     trace: list[str] = Field(default_factory=list)
     review_requests: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowRunRecord(BaseModel):
+    run_id: str
+    app_id: str
+    execution_source: WorkflowExecutionSource
+    draft_revision: int = Field(ge=1)
+    version_number: int | None = Field(default=None, ge=1)
+    thread_id: str
+    status: WorkflowRunStatus
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    output: Any = None
+    error: str | None = None
+    started_by: str
+    graph_sha256: str = Field(min_length=64, max_length=64)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: datetime | None = None
+
+
+class WorkflowRunEventRecord(BaseModel):
+    event_id: str
+    run_id: str
+    event_type: WorkflowRunEventType
+    message: str
+    node_id: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WorkflowReviewRequestRecord(BaseModel):
+    review_id: str
+    run_id: str
+    node_id: str
+    status: WorkflowReviewStatus = WorkflowReviewStatus.pending
+    payload: dict[str, Any] = Field(default_factory=dict)
+    reviewer: str | None = None
+    decision_reason: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    decided_at: datetime | None = None
+
+
+class WorkflowReviewDecisionResponse(BaseModel):
+    review: WorkflowReviewRequestRecord
+    run: WorkflowRunRecord
+    result: WorkflowDraftRunResponse | None = None
+
+
+class WorkflowAuditEventRecord(BaseModel):
+    audit_id: str
+    app_id: str
+    actor: str
+    action: str
+    resource_type: str
+    resource_id: str
+    details: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WorkflowRunMetricsResponse(BaseModel):
+    window_hours: int = Field(ge=1)
+    total_runs: int = Field(ge=0)
+    by_status: dict[str, int] = Field(default_factory=dict)
+    success_rate: float = Field(ge=0.0, le=1.0)
+    average_duration_ms: float | None = None
+    p95_duration_ms: int | None = None
+    pending_reviews: int = Field(ge=0)
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ChatResponse(BaseModel):

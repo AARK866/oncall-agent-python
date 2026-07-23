@@ -14,6 +14,7 @@ _SQLITE_CONTEXTS: dict[str, Any] = {}
 def create_langgraph_checkpointer(
     mode: str,
     sqlite_path: str | None = None,
+    setting_name: str = "OPS_GRAPH_CHECKPOINTER",
 ) -> tuple[Any | None, str]:
     normalized_mode = mode.strip().lower()
     if normalized_mode in {"", "none", "disabled", "off"}:
@@ -25,13 +26,19 @@ def create_langgraph_checkpointer(
     if normalized_mode in {"memory", "in_memory"}:
         if not is_memory_checkpointer_available():
             raise RuntimeError(
-                "OPS_GRAPH_CHECKPOINTER=memory requires langgraph.checkpoint.memory."
+                f"{setting_name}=memory requires langgraph.checkpoint.memory."
             )
         return _memory_checkpointer(), "memory"
     if normalized_mode in {"sqlite", "sqlite_persistent", "persistent_sqlite"}:
-        return _sqlite_checkpointer(sqlite_path or settings.ops_graph_checkpoint_db_path), "sqlite"
+        return (
+            _sqlite_checkpointer(
+                sqlite_path or settings.ops_graph_checkpoint_db_path,
+                setting_name=setting_name,
+            ),
+            "sqlite",
+        )
 
-    raise ValueError(f"Unsupported OPS_GRAPH_CHECKPOINTER: {mode}")
+    raise ValueError(f"Unsupported {setting_name}: {mode}")
 
 
 def is_memory_checkpointer_available() -> bool:
@@ -51,10 +58,13 @@ def _memory_checkpointer() -> Any:
     return _MEMORY_CHECKPOINTER
 
 
-def _sqlite_checkpointer(db_path: str) -> Any:
+def _sqlite_checkpointer(
+    db_path: str,
+    setting_name: str = "OPS_GRAPH_CHECKPOINTER",
+) -> Any:
     if not is_sqlite_checkpointer_available():
         raise RuntimeError(
-            "OPS_GRAPH_CHECKPOINTER=sqlite requires langgraph-checkpoint-sqlite. "
+            f"{setting_name}=sqlite requires langgraph-checkpoint-sqlite. "
             "Install it with: pip install langgraph-checkpoint-sqlite"
         )
 

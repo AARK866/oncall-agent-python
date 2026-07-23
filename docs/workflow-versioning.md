@@ -17,6 +17,7 @@ draft.
   deletes version history.
 - A published version can be executed directly, so later draft edits cannot
   change production behavior.
+- Publish and rollback actions are written to the workflow audit log.
 
 ## Storage Model
 
@@ -56,3 +57,6 @@ edit draft -> validate -> publish immutable v1 -> edit draft -> publish v2
 Publishing a rollback-restored draft creates the next version number. For
 example, restoring `v1` after `v2` and publishing it produces `v3`; history
 remains `v1`, `v2`, `v3`.
+
+Runtime events, persisted approvals, and audit query APIs are documented in
+`docs/workflow-observability-review.md`.

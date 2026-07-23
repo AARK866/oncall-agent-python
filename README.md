@@ -46,6 +46,7 @@ Docs:
 - Workflow control-plane domain model: `docs/workflow-domain-model.md`
 - Workflow validation and LangGraph runtime: `docs/workflow-validation-runtime.md`
 - Workflow publishing, immutable versions, and rollback: `docs/workflow-versioning.md`
+- Workflow observability, persisted review, and audit: `docs/workflow-observability-review.md`
 - Real ops connectors: `docs/real-ops-connectors.md`
 - Security and production: `docs/security-production.md`
 - Tools health API: `docs/tools-health-api.md`

@@ -6,7 +6,12 @@ from app.storage.sqlite_knowledge_manifest_store import (
 )
 from app.storage.sqlite_knowledge_task_store import SQLiteKnowledgeTaskStore
 from app.storage.sqlite_task_store import SQLiteTaskStore
-from app.storage.sqlite_workflow_store import SQLiteWorkflowStore, WorkflowRevisionConflict
+from app.storage.sqlite_workflow_store import (
+    SQLiteWorkflowStore,
+    WorkflowReviewConflict,
+    WorkflowRevisionConflict,
+    WorkflowRunStateConflict,
+)
 
 __all__ = [
     "KnowledgeManifestRecord",
@@ -15,6 +20,8 @@ __all__ = [
     "SQLiteKnowledgeTaskStore",
     "SQLiteTaskStore",
     "SQLiteWorkflowStore",
+    "WorkflowReviewConflict",
     "WorkflowRevisionConflict",
+    "WorkflowRunStateConflict",
     "new_manifest_record",
 ]
