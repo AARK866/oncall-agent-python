@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.alerts import router as alerts_router
@@ -12,6 +13,7 @@ from app.api.tasks import router as tasks_router
 from app.api.tools import router as tools_router
 from app.api.workflows import router as workflows_router
 from app.config import settings
+from app.tasks import TaskDispatchError
 
 
 def create_app() -> FastAPI:
@@ -36,6 +38,20 @@ def create_app() -> FastAPI:
         StaticFiles(directory=WEB_DIR),
         name="console-assets",
     )
+
+    @app.exception_handler(TaskDispatchError)
+    async def task_dispatch_error_handler(
+        _request: Request,
+        _exc: TaskDispatchError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": (
+                    "Task broker unavailable; the durable task remains queued."
+                )
+            },
+        )
 
     @app.get("/")
     def root() -> dict[str, str]:

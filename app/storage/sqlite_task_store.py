@@ -236,28 +236,43 @@ class SQLiteTaskStore:
             )
         return self.require_alert_group(group.group_id)
 
-    def mark_running(self, task_id: str) -> DiagnosisTaskRecord:
+    def claim_for_execution(
+        self,
+        task_id: str,
+        allowed_statuses: tuple[DiagnosisTaskStatus, ...] = (
+            DiagnosisTaskStatus.queued,
+            DiagnosisTaskStatus.waiting_review,
+        ),
+    ) -> DiagnosisTaskRecord | None:
         now = datetime.utcnow()
+        placeholders = ", ".join("?" for _ in allowed_statuses)
         with self._connect() as connection:
-            connection.execute(
-                """
+            cursor = connection.execute(
+                f"""
                 UPDATE diagnosis_tasks
                 SET status = ?, updated_at = ?, started_at = ?
-                WHERE task_id = ?
+                WHERE task_id = ? AND status IN ({placeholders})
                 """,
                 (
                     DiagnosisTaskStatus.running.value,
                     _datetime_to_text(now),
                     _datetime_to_text(now),
                     task_id,
+                    *(status.value for status in allowed_statuses),
                 ),
             )
+        if cursor.rowcount == 0:
+            return None
         self.append_event(
             task_id=task_id,
             event_type=DiagnosisTaskEventType.running,
             message="Diagnosis task started.",
         )
         return self.require_task(task_id)
+
+    def mark_running(self, task_id: str) -> DiagnosisTaskRecord:
+        task = self.claim_for_execution(task_id)
+        return task or self.require_task(task_id)
 
     def mark_cancel_requested(
         self,

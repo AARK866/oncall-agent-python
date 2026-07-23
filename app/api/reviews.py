@@ -7,7 +7,7 @@ from app.schemas import (
 )
 from app.security import require_api_token
 from app.storage import SQLiteTaskStore
-from app.tasks import DiagnosisTaskQueue
+from app.tasks import DiagnosisTaskQueue, TaskDispatcher
 
 router = APIRouter(
     prefix="/api/reviews",
@@ -39,7 +39,7 @@ async def approve_human_review(
     background_tasks: BackgroundTasks,
 ) -> HumanReviewRequestRecord:
     review = _decide(review_id, HumanReviewStatus.approved, request)
-    background_tasks.add_task(DiagnosisTaskQueue().run, review.task_id)
+    TaskDispatcher().dispatch_diagnosis(review.task_id, background_tasks)
     return review
 
 

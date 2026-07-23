@@ -34,6 +34,11 @@ def test_docker_compose_defines_api_and_optional_milvus_profile() -> None:
     assert "postgres:" in compose
     assert "DATABASE_URL:" in compose
     assert 'DATABASE_AUTO_CREATE_SCHEMA: "false"' in compose
+    assert "redis:" in compose
+    assert "worker:" in compose
+    assert "beat:" in compose
+    assert "TASK_QUEUE_MODE: celery" in compose
+    assert "service_completed_successfully" in compose
 
 
 def test_github_actions_runs_tests_and_docker_build() -> None:

@@ -97,6 +97,10 @@ def validate_production_security() -> list[str]:
         missing.append("DATABASE_URL")
     if settings.database_auto_create_schema:
         missing.append("DATABASE_AUTO_CREATE_SCHEMA=false")
+    if settings.task_queue_mode.strip().lower() != "celery":
+        missing.append("TASK_QUEUE_MODE=celery")
+    if not settings.redis_url:
+        missing.append("REDIS_URL")
     return sorted(set(missing))
 
 
@@ -136,6 +140,7 @@ def _configured_secrets() -> list[str]:
             settings.api_token,
             settings.webhook_secret,
             settings.database_url,
+            settings.redis_url,
             settings.llm_api_key,
             settings.embedding_api_key,
             settings.github_token,

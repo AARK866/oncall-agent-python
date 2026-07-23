@@ -12,7 +12,11 @@ from app.schemas import (
     AlertmanagerWebhookRequest,
 )
 from app.security import require_api_token, require_webhook_auth
-from app.tasks import DiagnosisTaskQueue, DiagnosisTaskSubmission
+from app.tasks import (
+    DiagnosisTaskQueue,
+    DiagnosisTaskSubmission,
+    TaskDispatcher,
+)
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -205,7 +209,10 @@ def _submit_background_diagnosis(
         trigger_metadata=trigger_metadata,
     )
     if submission.scheduled:
-        background_tasks.add_task(queue.run, submission.task.task_id)
+        TaskDispatcher().dispatch_diagnosis(
+            submission.task.task_id,
+            background_tasks,
+        )
     return submission
 
 

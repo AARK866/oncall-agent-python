@@ -11,6 +11,9 @@ services:
       APP_ENV: ${APP_ENV:-production}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-oncall}:${POSTGRES_PASSWORD:-oncall_dev_password}@postgres:5432/${POSTGRES_DB:-oncall_agent}
       DATABASE_AUTO_CREATE_SCHEMA: "false"
+      TASK_QUEUE_MODE: celery
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
       MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434/v1}
       PROMETHEUS_BASE_URL: ${PROMETHEUS_BASE_URL:-http://host.docker.internal:9090}
@@ -22,6 +25,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -32,6 +39,102 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: oncall-agent-python:local
+    container_name: oncall-agent-migrate
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-oncall}:${POSTGRES_PASSWORD:-oncall_dev_password}@postgres:5432/${POSTGRES_DB:-oncall_agent}
+      DATABASE_AUTO_CREATE_SCHEMA: "false"
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: oncall-agent-python:local
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-oncall}:${POSTGRES_PASSWORD:-oncall_dev_password}@postgres:5432/${POSTGRES_DB:-oncall_agent}
+      DATABASE_AUTO_CREATE_SCHEMA: "false"
+      TASK_QUEUE_MODE: celery
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434/v1}
+      PROMETHEUS_BASE_URL: ${PROMETHEUS_BASE_URL:-http://host.docker.internal:9090}
+      LOKI_BASE_URL: ${LOKI_BASE_URL:-http://host.docker.internal:3100}
+    command:
+      - python
+      - -m
+      - celery
+      - -A
+      - app.tasks.celery_app:celery_app
+      - worker
+      - --loglevel=INFO
+      - --queues=diagnosis,knowledge,maintenance
+      - --concurrency=${CELERY_WORKER_CONCURRENCY:-2}
+      - --hostname=worker@%h
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -m celery -A app.tasks.celery_app:celery_app inspect ping -d worker@$$HOSTNAME --timeout=5
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: oncall-agent-python:local
+    container_name: oncall-agent-beat
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-oncall}:${POSTGRES_PASSWORD:-oncall_dev_password}@postgres:5432/${POSTGRES_DB:-oncall_agent}
+      DATABASE_AUTO_CREATE_SCHEMA: "false"
+      TASK_QUEUE_MODE: celery
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    command:
+      - python
+      - -m
+      - celery
+      - -A
+      - app.tasks.celery_app:celery_app
+      - beat
+      - --loglevel=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   postgres:
@@ -51,6 +154,21 @@ services:
         - pg_isready -U ${POSTGRES_USER:-oncall} -d ${POSTGRES_DB:-oncall_agent}
       interval: 5s
       timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: oncall-redis
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 10
     restart: unless-stopped
 
@@ -111,6 +229,7 @@ services:
 volumes:
   oncall-data:
   postgres-data:
+  redis-data:
   etcd-data:
   minio-data:
   milvus-data:

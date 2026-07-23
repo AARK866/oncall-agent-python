@@ -374,7 +374,9 @@ class DiagnosisTaskQueue:
         if should_resume_after_review and not self._all_reviews_approved(task_id):
             return
 
-        task = self.task_store.mark_running(task_id)
+        task = self.task_store.claim_for_execution(task_id)
+        if task is None:
+            return
         trigger_metadata = dict(task.trigger_metadata)
         trigger_metadata["task_id"] = task.task_id
         trigger_metadata["task_source"] = task.source

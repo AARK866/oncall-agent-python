@@ -18,7 +18,7 @@ from app.schemas import (
 )
 from app.rag.access_control import KnowledgeAccessContext
 from app.security import require_api_principal, require_api_token
-from app.tasks import KnowledgeIngestionQueue
+from app.tasks import KnowledgeIngestionQueue, TaskDispatcher
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
@@ -111,7 +111,10 @@ async def submit_knowledge_ingestion_task(
 ) -> KnowledgeIngestionTaskRecord:
     queue = _ingestion_queue()
     task = queue.submit(request)
-    background_tasks.add_task(queue.run, task.task_id)
+    TaskDispatcher().dispatch_knowledge_ingestion(
+        task.task_id,
+        background_tasks,
+    )
     return task
 
 
@@ -190,7 +193,10 @@ async def retry_knowledge_ingestion_task(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
-    background_tasks.add_task(queue.run, task.task_id)
+    TaskDispatcher().dispatch_knowledge_ingestion(
+        task.task_id,
+        background_tasks,
+    )
     return task
 
 

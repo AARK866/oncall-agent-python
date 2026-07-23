@@ -18,6 +18,23 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "database_pool_timeout_seconds", 5)
     monkeypatch.setattr(settings, "database_pool_recycle_seconds", 300)
     monkeypatch.setattr(settings, "database_auto_create_schema", True)
+    monkeypatch.setattr(settings, "task_queue_mode", "local")
+    monkeypatch.setattr(settings, "redis_url", "redis://localhost:6379/15")
+    monkeypatch.setattr(settings, "celery_result_backend", None)
+    monkeypatch.setattr(settings, "celery_task_always_eager", False)
+    monkeypatch.setattr(settings, "celery_task_eager_propagates", True)
+    monkeypatch.setattr(settings, "celery_result_expires_seconds", 3600)
+    monkeypatch.setattr(settings, "task_dispatch_dedupe_ttl_seconds", 30)
+    monkeypatch.setattr(settings, "task_execution_lock_ttl_seconds", 3600)
+    monkeypatch.setattr(settings, "task_broker_publish_max_retries", 3)
+    monkeypatch.setattr(
+        settings,
+        "task_broker_publish_retry_delay_seconds",
+        0.01,
+    )
+    monkeypatch.setattr(settings, "stale_task_recovery_interval_seconds", 60)
+    monkeypatch.setattr(settings, "stale_task_auto_resume_enabled", True)
+    monkeypatch.setattr(settings, "redis_key_prefix", "oncall-agent-test")
     monkeypatch.setattr(settings, "llm_provider", "mock")
     monkeypatch.setattr(settings, "llm_api_key", None)
     monkeypatch.setattr(settings, "embedding_provider", "hash")

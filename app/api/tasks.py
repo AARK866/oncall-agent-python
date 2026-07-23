@@ -13,7 +13,7 @@ from app.schemas import (
     StaleTaskRecoveryResponse,
 )
 from app.security import require_api_token
-from app.tasks import DiagnosisTaskQueue
+from app.tasks import DiagnosisTaskQueue, TaskDispatcher
 
 router = APIRouter(
     prefix="/api/tasks",
@@ -75,7 +75,7 @@ async def rerun_task(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
-    background_tasks.add_task(queue.run, task.task_id)
+    TaskDispatcher().dispatch_diagnosis(task.task_id, background_tasks)
     return task
 
 
@@ -102,7 +102,7 @@ async def resume_task(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
-    background_tasks.add_task(queue.run, task.task_id)
+    TaskDispatcher().dispatch_diagnosis(task.task_id, background_tasks)
     return task
 
 
