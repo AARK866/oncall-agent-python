@@ -296,6 +296,37 @@ class WorkflowDraftRecord(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class WorkflowPublishRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    published_by: str = Field(default="manual", min_length=1, max_length=120)
+    release_notes: str = Field(default="", max_length=4000)
+
+
+class WorkflowVersionRecord(BaseModel):
+    version_id: str
+    app_id: str
+    version_number: int = Field(ge=1)
+    source_draft_revision: int = Field(ge=1)
+    graph: WorkflowGraphDefinition
+    graph_sha256: str = Field(min_length=64, max_length=64)
+    release_notes: str = ""
+    published_by: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WorkflowVersionRollbackRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    requested_by: str = Field(default="manual", min_length=1, max_length=120)
+    reason: str = Field(default="", max_length=2000)
+
+
+class WorkflowVersionRollbackResponse(BaseModel):
+    version: WorkflowVersionRecord
+    draft: WorkflowDraftRecord
+    requested_by: str
+    reason: str = ""
+
+
 class WorkflowValidationSeverity(str, Enum):
     error = "error"
     warning = "warning"
@@ -328,11 +359,18 @@ class WorkflowRunStatus(str, Enum):
     waiting_review = "waiting_review"
 
 
+class WorkflowExecutionSource(str, Enum):
+    draft = "draft"
+    published = "published"
+
+
 class WorkflowDraftRunResponse(BaseModel):
     app_id: str
     draft_revision: int
     thread_id: str
     status: WorkflowRunStatus
+    execution_source: WorkflowExecutionSource = WorkflowExecutionSource.draft
+    version_number: int | None = Field(default=None, ge=1)
     output: Any = None
     node_outputs: dict[str, Any] = Field(default_factory=dict)
     trace: list[str] = Field(default_factory=list)

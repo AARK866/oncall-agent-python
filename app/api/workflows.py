@@ -8,7 +8,11 @@ from app.schemas import (
     WorkflowDraftRunRequest,
     WorkflowDraftRunResponse,
     WorkflowDraftUpdate,
+    WorkflowPublishRequest,
     WorkflowValidationReport,
+    WorkflowVersionRecord,
+    WorkflowVersionRollbackRequest,
+    WorkflowVersionRollbackResponse,
 )
 from app.security import require_api_token
 from app.storage import WorkflowRevisionConflict
@@ -133,6 +137,124 @@ async def run_workflow_draft(
         raise HTTPException(
             status_code=422,
             detail=exc.report.model_dump(mode="json"),
+        ) from None
+    except WorkflowNodeExecutionError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"message": str(exc), "node_id": exc.node_id},
+        ) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.post(
+    "/{app_id}/publish",
+    response_model=WorkflowVersionRecord,
+    status_code=status.HTTP_201_CREATED,
+)
+async def publish_workflow(
+    app_id: str,
+    request: WorkflowPublishRequest,
+) -> WorkflowVersionRecord:
+    try:
+        return _service().publish(app_id, request)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow application not found",
+        ) from None
+    except WorkflowRevisionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(exc),
+                "expected_revision": exc.expected_revision,
+                "current_revision": exc.current_revision,
+            },
+        ) from None
+    except WorkflowValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=exc.report.model_dump(mode="json"),
+        ) from None
+
+
+@router.get(
+    "/{app_id}/versions",
+    response_model=list[WorkflowVersionRecord],
+)
+async def list_workflow_versions(
+    app_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[WorkflowVersionRecord]:
+    try:
+        return _service().list_versions(app_id, limit=limit)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow application not found",
+        ) from None
+
+
+@router.get(
+    "/{app_id}/versions/{version_number}",
+    response_model=WorkflowVersionRecord,
+)
+async def get_workflow_version(
+    app_id: str,
+    version_number: int,
+) -> WorkflowVersionRecord:
+    try:
+        return _service().get_version(app_id, version_number)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow version not found",
+        ) from None
+
+
+@router.post(
+    "/{app_id}/versions/{version_number}/rollback",
+    response_model=WorkflowVersionRollbackResponse,
+)
+async def rollback_workflow_version(
+    app_id: str,
+    version_number: int,
+    request: WorkflowVersionRollbackRequest,
+) -> WorkflowVersionRollbackResponse:
+    try:
+        return _service().rollback(app_id, version_number, request)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow version not found",
+        ) from None
+    except WorkflowRevisionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(exc),
+                "expected_revision": exc.expected_revision,
+                "current_revision": exc.current_revision,
+            },
+        ) from None
+
+
+@router.post(
+    "/{app_id}/versions/{version_number}/run",
+    response_model=WorkflowDraftRunResponse,
+)
+async def run_workflow_version(
+    app_id: str,
+    version_number: int,
+    request: WorkflowDraftRunRequest,
+) -> WorkflowDraftRunResponse:
+    try:
+        return await _service().run_version(app_id, version_number, request)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow version not found",
         ) from None
     except WorkflowNodeExecutionError as exc:
         raise HTTPException(

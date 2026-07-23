@@ -36,6 +36,8 @@ SQLite tables:
 
 ```text
 workflow_applications (1) ---- (1) workflow_drafts
+           |
+           +--------------- (N) workflow_versions
 ```
 
 The foreign key prevents orphan drafts. Applications are archived rather than
@@ -51,6 +53,9 @@ PATCH /api/workflow-apps/{app_id}
 GET   /api/workflow-apps/{app_id}/draft
 PUT   /api/workflow-apps/{app_id}/draft
 ```
+
+Published versions, rollback semantics, and version execution are documented in
+`docs/workflow-versioning.md`.
 
 Draft updates must provide `expected_revision`. If another editor has already
 saved a newer draft, the API returns HTTP `409` with both expected and current
