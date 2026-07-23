@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     knowledge_manifest_db_path: str = "app/data/knowledge_manifest.db"
     knowledge_ingestion_task_db_path: str = "app/data/knowledge_ingestion_tasks.db"
     knowledge_ingestion_max_attempts: int = 3
+    workflow_db_path: str = "app/data/workflows.db"
     milvus_uri: str | None = None
     milvus_token: str | None = None
     milvus_db_name: str | None = None

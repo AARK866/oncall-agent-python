@@ -37,6 +37,7 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         "app/data/knowledge_ingestion_tasks.db",
     )
     monkeypatch.setattr(settings, "knowledge_ingestion_max_attempts", 3)
+    monkeypatch.setattr(settings, "workflow_db_path", "app/data/workflows.db")
     monkeypatch.setattr(settings, "ops_tool_mode", "mock")
     monkeypatch.setattr(settings, "prometheus_base_url", None)
     monkeypatch.setattr(settings, "loki_base_url", None)

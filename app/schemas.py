@@ -219,6 +219,83 @@ class KnowledgeIngestionRetryRequest(BaseModel):
     requested_by: str = Field(default="manual", min_length=1, max_length=120)
 
 
+class WorkflowApplicationStatus(str, Enum):
+    active = "active"
+    archived = "archived"
+
+
+class WorkflowNodeType(str, Enum):
+    start = "start"
+    agent = "agent"
+    knowledge_retrieval = "knowledge_retrieval"
+    tool = "tool"
+    human_review = "human_review"
+    end = "end"
+
+
+class WorkflowNodePosition(BaseModel):
+    x: float = 0
+    y: float = 0
+
+
+class WorkflowNodeDefinition(BaseModel):
+    node_id: str = Field(min_length=1, max_length=120)
+    node_type: WorkflowNodeType
+    name: str = Field(min_length=1, max_length=200)
+    config: dict[str, Any] = Field(default_factory=dict)
+    position: WorkflowNodePosition = Field(default_factory=WorkflowNodePosition)
+
+
+class WorkflowEdgeDefinition(BaseModel):
+    edge_id: str = Field(min_length=1, max_length=120)
+    source_node_id: str = Field(min_length=1, max_length=120)
+    target_node_id: str = Field(min_length=1, max_length=120)
+    condition: str | None = Field(default=None, max_length=1000)
+    priority: int = Field(default=0, ge=0)
+
+
+class WorkflowGraphDefinition(BaseModel):
+    schema_version: str = "1.0"
+    nodes: list[WorkflowNodeDefinition] = Field(default_factory=list)
+    edges: list[WorkflowEdgeDefinition] = Field(default_factory=list)
+    variables: dict[str, Any] = Field(default_factory=dict)
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowApplicationCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+
+
+class WorkflowApplicationUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    status: WorkflowApplicationStatus | None = None
+
+
+class WorkflowApplicationRecord(BaseModel):
+    app_id: str
+    name: str
+    description: str = ""
+    status: WorkflowApplicationStatus = WorkflowApplicationStatus.active
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class WorkflowDraftUpdate(BaseModel):
+    expected_revision: int = Field(ge=1)
+    graph: WorkflowGraphDefinition
+
+
+class WorkflowDraftRecord(BaseModel):
+    draft_id: str
+    app_id: str
+    revision: int = Field(ge=1)
+    graph: WorkflowGraphDefinition = Field(default_factory=WorkflowGraphDefinition)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ChatResponse(BaseModel):
     session_id: str
     answer: str

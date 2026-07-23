@@ -8,6 +8,7 @@ from app.api.knowledge import router as knowledge_router
 from app.api.reviews import router as reviews_router
 from app.api.tasks import router as tasks_router
 from app.api.tools import router as tools_router
+from app.api.workflows import router as workflows_router
 from app.config import settings
 
 
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks_router)
     app.include_router(reviews_router)
     app.include_router(tools_router)
+    app.include_router(workflows_router)
 
     @app.get("/")
     def root() -> dict[str, str]:
