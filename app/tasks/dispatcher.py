@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.config import settings
+from app.security_context import current_tenant_id, tenant_scope
 from app.tasks.redis_coordination import RedisCoordinator
 
 DIAGNOSIS_TASK_NAME = "oncall.tasks.run_diagnosis"
@@ -79,13 +80,14 @@ class TaskDispatcher:
         queue_name: str,
         background_tasks: Any | None,
     ) -> DispatchReceipt:
+        tenant_id = current_tenant_id()
         if self.mode == "local":
             if background_tasks is None:
                 raise RuntimeError(
                     "Local task dispatch requires FastAPI BackgroundTasks."
                 )
             background_tasks.add_task(
-                _local_runner(task_kind),
+                _tenant_local_runner(task_kind, tenant_id),
                 business_task_id,
             )
             return DispatchReceipt(
@@ -123,7 +125,7 @@ class TaskDispatcher:
         try:
             application.send_task(
                 celery_task_name,
-                args=[business_task_id],
+                args=[business_task_id, tenant_id],
                 task_id=broker_task_id,
                 queue=queue_name,
                 retry=True,
@@ -164,6 +166,16 @@ def _local_runner(task_kind: str):
 
         return KnowledgeIngestionQueue().run
     raise ValueError(f"Unsupported local task kind: {task_kind}")
+
+
+def _tenant_local_runner(task_kind: str, tenant_id: str):
+    runner = _local_runner(task_kind)
+
+    async def run(task_id: str):
+        with tenant_scope(tenant_id):
+            return await runner(task_id)
+
+    return run
 
 
 def _celery_application():

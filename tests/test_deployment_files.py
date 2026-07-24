@@ -39,6 +39,15 @@ def test_docker_compose_defines_api_and_optional_milvus_profile() -> None:
     assert "beat:" in compose
     assert "TASK_QUEUE_MODE: celery" in compose
     assert "service_completed_successfully" in compose
+    assert "POSTGRES_APP_USER" in compose
+    assert "POSTGRES_APP_PASSWORD" in compose
+    assert "init-app-role.sh" in compose
+
+    role_bootstrap = (
+        ROOT / "docker" / "postgres" / "init-app-role.sh"
+    ).read_text(encoding="utf-8")
+    assert "NOSUPERUSER" in role_bootstrap
+    assert "NOBYPASSRLS" in role_bootstrap
 
 
 def test_github_actions_runs_tests_and_docker_build() -> None:

@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.config import settings
+from app.security_context import current_tenant_id
 from app.schemas import (
     AlertGroupRecord,
     AlertGroupStatus,
@@ -65,6 +66,7 @@ class SQLiteTaskStore:
         now = datetime.utcnow()
         task = DiagnosisTaskRecord(
             task_id=f"task_{uuid4().hex}",
+            tenant_id=current_tenant_id(),
             alert_group_id=alert_group_id,
             rerun_of_task_id=rerun_of_task_id,
             resume_of_task_id=resume_of_task_id,
@@ -1085,6 +1087,7 @@ def _task_from_row(row: DatabaseRow) -> DiagnosisTaskRecord:
     result_data = _json_loads(row["result_json"], None)
     return DiagnosisTaskRecord(
         task_id=row["task_id"],
+        tenant_id=row.get("tenant_id", settings.default_tenant_id),
         alert_group_id=row["alert_group_id"],
         rerun_of_task_id=row["rerun_of_task_id"],
         resume_of_task_id=row["resume_of_task_id"],

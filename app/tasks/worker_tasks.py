@@ -7,6 +7,10 @@ from redis.exceptions import RedisError
 from sqlalchemy.exc import OperationalError
 
 from app.config import settings
+from app.security_context import (
+    system_database_scope,
+    tenant_scope,
+)
 from app.schemas import (
     DiagnosisTaskStatus,
     KnowledgeIngestionTaskStatus,
@@ -33,27 +37,32 @@ _TRANSIENT_ERRORS = (OperationalError, RedisError, ConnectionError, TimeoutError
     acks_late=True,
     reject_on_worker_lost=True,
 )
-def run_diagnosis_task(self, task_id: str) -> dict[str, Any]:
-    coordinator = RedisCoordinator()
-    try:
-        with coordinator.execution_lease("diagnosis", task_id) as lease:
-            if not lease.acquired:
+def run_diagnosis_task(
+    self,
+    task_id: str,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    with tenant_scope(tenant_id or settings.default_tenant_id):
+        coordinator = RedisCoordinator()
+        try:
+            with coordinator.execution_lease("diagnosis", task_id) as lease:
+                if not lease.acquired:
+                    return {
+                        "task_id": task_id,
+                        "status": "duplicate_ignored",
+                    }
+                queue = DiagnosisTaskQueue()
+                asyncio.run(queue.run(task_id))
+                record = queue.get(task_id)
                 return {
                     "task_id": task_id,
-                    "status": "duplicate_ignored",
+                    "status": record.status.value if record else "not_found",
                 }
-            queue = DiagnosisTaskQueue()
-            asyncio.run(queue.run(task_id))
-            record = queue.get(task_id)
-            return {
-                "task_id": task_id,
-                "status": record.status.value if record else "not_found",
-            }
-    except _TRANSIENT_ERRORS as exc:
-        raise self.retry(
-            exc=exc,
-            countdown=min(2 ** (self.request.retries + 1), 30),
-        )
+        except _TRANSIENT_ERRORS as exc:
+            raise self.retry(
+                exc=exc,
+                countdown=min(2 ** (self.request.retries + 1), 30),
+            )
 
 
 @celery_app.task(
@@ -63,45 +72,51 @@ def run_diagnosis_task(self, task_id: str) -> dict[str, Any]:
     acks_late=True,
     reject_on_worker_lost=True,
 )
-def run_knowledge_ingestion_task(self, task_id: str) -> dict[str, Any]:
-    coordinator = RedisCoordinator()
-    try:
-        with coordinator.execution_lease("knowledge", task_id) as lease:
-            if not lease.acquired:
+def run_knowledge_ingestion_task(
+    self,
+    task_id: str,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
+    with tenant_scope(tenant_id or settings.default_tenant_id):
+        coordinator = RedisCoordinator()
+        try:
+            with coordinator.execution_lease("knowledge", task_id) as lease:
+                if not lease.acquired:
+                    return {
+                        "task_id": task_id,
+                        "status": "duplicate_ignored",
+                    }
+
+                queue = KnowledgeIngestionQueue()
+                record = asyncio.run(queue.run(task_id))
+                if (
+                    record.status == KnowledgeIngestionTaskStatus.failed
+                    and record.attempt < settings.knowledge_ingestion_max_attempts
+                ):
+                    queue.retry(task_id)
+                    raise self.retry(
+                        countdown=min(2 ** record.attempt, 60),
+                    )
                 return {
                     "task_id": task_id,
-                    "status": "duplicate_ignored",
+                    "status": record.status.value,
+                    "attempt": record.attempt,
                 }
-
-            queue = KnowledgeIngestionQueue()
-            record = asyncio.run(queue.run(task_id))
-            if (
-                record.status == KnowledgeIngestionTaskStatus.failed
-                and record.attempt < settings.knowledge_ingestion_max_attempts
-            ):
-                queue.retry(task_id)
-                raise self.retry(
-                    countdown=min(2 ** record.attempt, 60),
-                )
-            return {
-                "task_id": task_id,
-                "status": record.status.value,
-                "attempt": record.attempt,
-            }
-    except _TRANSIENT_ERRORS as exc:
-        raise self.retry(
-            exc=exc,
-            countdown=min(2 ** (self.request.retries + 1), 30),
-        )
+        except _TRANSIENT_ERRORS as exc:
+            raise self.retry(
+                exc=exc,
+                countdown=min(2 ** (self.request.retries + 1), 30),
+            )
 
 
 @celery_app.task(name=RECOVERY_TASK_NAME)
 def recover_stale_tasks() -> dict[str, Any]:
     queue = DiagnosisTaskQueue()
-    recovered = queue.recover_stale_tasks(
-        requested_by="celery-beat",
-        reason="Distributed worker heartbeat exceeded the task timeout.",
-    )
+    with system_database_scope():
+        recovered = queue.recover_stale_tasks(
+            requested_by="celery-beat",
+            reason="Distributed worker heartbeat exceeded the task timeout.",
+        )
     resumed_task_ids: list[str] = []
     if (
         settings.stale_task_auto_resume_enabled
@@ -111,13 +126,16 @@ def recover_stale_tasks() -> dict[str, Any]:
         for task in recovered:
             if task.status != DiagnosisTaskStatus.timed_out:
                 continue
-            resumed = queue.resume(
-                task.task_id,
-                requested_by="celery-beat",
-                reason="Automatically resume stale task from latest checkpoint.",
-            )
-            dispatcher.dispatch_diagnosis(resumed.task_id)
-            resumed_task_ids.append(resumed.task_id)
+            with tenant_scope(
+                getattr(task, "tenant_id", settings.default_tenant_id)
+            ):
+                resumed = queue.resume(
+                    task.task_id,
+                    requested_by="celery-beat",
+                    reason="Automatically resume stale task from latest checkpoint.",
+                )
+                dispatcher.dispatch_diagnosis(resumed.task_id)
+                resumed_task_ids.append(resumed.task_id)
 
     return {
         "recovered": len(recovered),

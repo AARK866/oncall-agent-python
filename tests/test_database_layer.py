@@ -42,6 +42,7 @@ def test_alembic_migration_creates_and_drops_enterprise_schema(
     command.upgrade(config, "head")
     database = Database(settings.database_url)
     table_names = set(inspect(database.engine).get_table_names())
+    inspector = inspect(database.engine)
 
     assert {
         "alembic_version",
@@ -51,6 +52,19 @@ def test_alembic_migration_creates_and_drops_enterprise_schema(
         "workflow_applications",
         "workflow_runs",
     }.issubset(table_names)
+    assert "tenant_id" in {
+        column["name"]
+        for column in inspector.get_columns("diagnosis_tasks")
+    }
+    assert {
+        "tenant_id",
+        "namespace",
+        "doc_id",
+    } == set(
+        inspector.get_pk_constraint(
+            "knowledge_index_manifest"
+        )["constrained_columns"]
+    )
 
     command.downgrade(config, "base")
     assert set(inspect(database.engine).get_table_names()) == {"alembic_version"}
@@ -70,6 +84,9 @@ def test_alembic_migration_renders_for_postgresql(monkeypatch) -> None:
     migration_sql = output.getvalue()
     assert "CREATE TABLE workflow_runs" in migration_sql
     assert "CREATE INDEX idx_workflow_runs_app_status" in migration_sql
+    assert "ENABLE ROW LEVEL SECURITY" in migration_sql
+    assert "FORCE ROW LEVEL SECURITY" in migration_sql
+    assert "CREATE POLICY tenant_isolation" in migration_sql
 
 
 def test_store_uses_migrated_database_without_runtime_schema_creation(

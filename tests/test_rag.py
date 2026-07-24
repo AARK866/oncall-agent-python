@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 
 from app.config import settings
@@ -10,6 +12,7 @@ from app.rag import (
     MilvusVectorStore,
     create_embedding_model,
 )
+from app.rag.access_control import KnowledgeAccessContext
 
 
 def test_local_knowledge_base_searches_runbook() -> None:
@@ -155,16 +158,49 @@ def test_milvus_store_deletes_chunks_by_primary_ids() -> None:
 
     assert client.deleted == {
         "collection_name": settings.milvus_collection_name,
-        "ids": ["payment.md#chunk-1", "order.md#chunk-0"],
+        "ids": [
+            hashlib.sha256(
+                b"default\0payment.md#chunk-1"
+            ).hexdigest(),
+            hashlib.sha256(
+                b"default\0order.md#chunk-0"
+            ).hexdigest(),
+        ],
     }
+
+
+def test_milvus_search_pushes_tenant_filter_to_database() -> None:
+    client = FakeMilvusClient()
+    store = MilvusVectorStore(
+        embedding_model=HashEmbeddingModel(dimensions=16),
+        uri="http://milvus:19530",
+        dimensions=16,
+        client=client,
+    )
+    principal = KnowledgeAccessContext.from_roles(
+        subject="tenant-blue-user",
+        tenant_id="tenant-blue",
+        roles=["sre"],
+    )
+
+    store.search("payment", access_context=principal)
+
+    assert client.search_kwargs["filter"] == (
+        'tenant_id == "tenant-blue"'
+    )
 
 
 class FakeMilvusClient:
     def __init__(self) -> None:
         self.deleted = None
+        self.search_kwargs = None
 
     def delete(self, **kwargs) -> None:
         self.deleted = kwargs
+
+    def search(self, **kwargs):
+        self.search_kwargs = kwargs
+        return [[]]
 
 
 class QueryOnlyMilvusStore:

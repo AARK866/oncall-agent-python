@@ -1,3 +1,4 @@
+import hashlib
 import json
 from typing import Any
 
@@ -8,6 +9,7 @@ from app.rag.filters import matches_metadata
 from app.rag.splitter import DocumentChunk
 from app.rag.vector_store import InMemoryVectorStore
 from app.schemas import SourceDocument
+from app.security_context import current_tenant_id
 
 
 class MilvusVectorStore:
@@ -92,10 +94,16 @@ class MilvusVectorStore:
         if not chunks:
             return
 
+        tenant_id = current_tenant_id()
         records = [
             {
-                self.primary_field: chunk.chunk_id,
+                self.primary_field: _tenant_chunk_id(
+                    tenant_id,
+                    chunk.chunk_id,
+                ),
                 self.vector_field: self.embedding_model.embed(f"{chunk.title}\n{chunk.content}"),
+                "tenant_id": tenant_id,
+                "original_chunk_id": chunk.chunk_id,
                 "doc_id": chunk.doc_id,
                 "title": chunk.title,
                 "content": chunk.content,
@@ -109,7 +117,14 @@ class MilvusVectorStore:
     def delete_chunks(self, chunk_ids: list[str]) -> None:
         if not chunk_ids:
             return
-        self.client.delete(collection_name=self.collection_name, ids=chunk_ids)
+        tenant_id = current_tenant_id()
+        self.client.delete(
+            collection_name=self.collection_name,
+            ids=[
+                _tenant_chunk_id(tenant_id, chunk_id)
+                for chunk_id in chunk_ids
+            ],
+        )
 
     def search(
         self,
@@ -127,7 +142,20 @@ class MilvusVectorStore:
             data=[query_vector],
             anns_field=self.vector_field,
             limit=max(top_k * 10, top_k),
-            output_fields=[self.primary_field, "doc_id", "title", "content", "source", "metadata"],
+            filter=_tenant_filter(
+                access_context.tenant_id
+                if access_context
+                else settings.default_tenant_id
+            ),
+            output_fields=[
+                self.primary_field,
+                "original_chunk_id",
+                "doc_id",
+                "title",
+                "content",
+                "source",
+                "metadata",
+            ],
             search_params={"metric_type": self.metric_type},
         )
 
@@ -142,7 +170,18 @@ class MilvusVectorStore:
 
             documents.append(
                 SourceDocument(
-                    doc_id=str(_field(entity, self.primary_field, "id", default=_field(hit, "id", default=""))),
+                    doc_id=str(
+                        _field(
+                            entity,
+                            "original_chunk_id",
+                            default=_field(
+                                entity,
+                                self.primary_field,
+                                "id",
+                                default=_field(hit, "id", default=""),
+                            ),
+                        )
+                    ),
                     title=str(_field(entity, "title", default="")),
                     content=str(_field(entity, "content", default="")),
                     source=str(_field(entity, "source", default="milvus")),
@@ -200,6 +239,15 @@ def _score(hit: Any) -> float | None:
     if raw_score is None:
         return None
     return round(float(raw_score), 4)
+
+
+def _tenant_chunk_id(tenant_id: str, chunk_id: str) -> str:
+    identity = f"{tenant_id}\0{chunk_id}".encode("utf-8")
+    return hashlib.sha256(identity).hexdigest()
+
+
+def _tenant_filter(tenant_id: str) -> str:
+    return f"tenant_id == {json.dumps(tenant_id, ensure_ascii=False)}"
 
 
 __all__ = ["InMemoryVectorStore", "MilvusVectorStore"]

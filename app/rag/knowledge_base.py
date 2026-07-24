@@ -12,6 +12,7 @@ from app.rag.milvus_store import MilvusVectorStore
 from app.rag.retriever import LocalKnowledgeBase
 from app.rag.splitter import DocumentChunk, split_documents
 from app.rag.vector_store import InMemoryVectorStore
+from app.security_context import current_tenant_id
 from app.schemas import SourceDocument
 
 
@@ -316,6 +317,9 @@ def enrich_document_metadata(document: RawDocument) -> RawDocument:
     tags = sorted({*services, *incident_types})
     metadata = {
         **document.metadata,
+        "tenant_id": (
+            document.metadata.get("tenant_id") or current_tenant_id()
+        ),
         "services": services,
         "incident_types": incident_types,
         "tags": tags,

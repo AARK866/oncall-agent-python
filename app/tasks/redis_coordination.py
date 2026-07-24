@@ -7,6 +7,7 @@ from uuid import uuid4
 from redis import Redis
 
 from app.config import settings
+from app.security_context import current_tenant_id
 
 _COMPARE_AND_DELETE = """
 if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -112,7 +113,7 @@ class RedisCoordinator:
     def _key(namespace: str, task_kind: str, business_task_id: str) -> str:
         return (
             f"{settings.redis_key_prefix}:{namespace}:"
-            f"{task_kind}:{business_task_id}"
+            f"{current_tenant_id()}:{task_kind}:{business_task_id}"
         )
 
 

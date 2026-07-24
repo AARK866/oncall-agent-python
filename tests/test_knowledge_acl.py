@@ -30,6 +30,26 @@ def test_acl_scope_and_role_rules() -> None:
     assert can_access_document({"access_scope": "unknown"}, oncall) is False
 
 
+def test_document_tenant_is_enforced_even_when_acl_is_disabled(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "knowledge_acl_enabled", False)
+    tenant_a = KnowledgeAccessContext.from_roles(
+        subject="tenant-a-user",
+        tenant_id="tenant-a",
+        roles=["sre"],
+    )
+    tenant_b = KnowledgeAccessContext.from_roles(
+        subject="tenant-b-user",
+        tenant_id="tenant-b",
+        roles=["sre"],
+    )
+    metadata = {"tenant_id": "tenant-a", "access_scope": "public"}
+
+    assert can_access_document(metadata, tenant_a) is True
+    assert can_access_document(metadata, tenant_b) is False
+
+
 def test_knowledge_base_filters_before_returning_top_k() -> None:
     knowledge_base = _acl_knowledge_base()
 

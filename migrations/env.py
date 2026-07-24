@@ -19,11 +19,27 @@ config.set_main_option("sqlalchemy.url", database_url)
 target_metadata = metadata
 
 
+def _compare_server_default(
+    _context,
+    inspected_column,
+    metadata_column,
+    _inspected_default,
+    _metadata_default,
+    _rendered_metadata_default,
+):
+    if (
+        inspected_column.name == "tenant_id"
+        and metadata_column.name == "tenant_id"
+    ):
+        return False
+    return None
+
+
 def _configure_context(**kwargs) -> None:
     context.configure(
         target_metadata=target_metadata,
         compare_type=True,
-        compare_server_default=True,
+        compare_server_default=_compare_server_default,
         render_as_batch=database.dialect == "sqlite",
         **kwargs,
     )

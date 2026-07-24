@@ -10,6 +10,7 @@ from app.config import settings
 class KnowledgeAccessContext:
     subject: str
     roles: frozenset[str]
+    tenant_id: str = "default"
     authenticated: bool = True
     source: str = "system"
 
@@ -18,12 +19,14 @@ class KnowledgeAccessContext:
         cls,
         subject: str,
         roles: Iterable[str],
+        tenant_id: str | None = None,
         authenticated: bool = True,
         source: str = "system",
     ) -> "KnowledgeAccessContext":
         return cls(
             subject=subject,
             roles=frozenset(_normalized_values(roles)),
+            tenant_id=tenant_id or settings.default_tenant_id,
             authenticated=authenticated,
             source=source,
         )
@@ -42,10 +45,15 @@ def can_access_document(
     metadata: dict[str, Any],
     context: KnowledgeAccessContext | None,
 ) -> bool:
+    principal = context or system_access_context()
+    document_tenant = str(
+        metadata.get("tenant_id") or settings.default_tenant_id
+    ).strip()
+    if document_tenant != principal.tenant_id:
+        return False
     if not settings.knowledge_acl_enabled:
         return True
 
-    principal = context or system_access_context()
     scope = str(metadata.get("access_scope") or "internal").strip().lower()
     if scope == "public":
         return True

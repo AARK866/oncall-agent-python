@@ -10,6 +10,17 @@ class Settings(BaseSettings):
     api_token: str | None = None
     api_token_subject: str = "api-client"
     api_token_roles: str = "oncall,sre"
+    auth_mode: str = "api-token"
+    default_tenant_id: str = "default"
+    jwt_issuer: str | None = None
+    jwt_audience: str | None = None
+    jwt_jwks_url: str | None = None
+    jwt_secret: str | None = None
+    jwt_algorithms: str = "RS256"
+    jwt_tenant_claim: str = "tenant_id"
+    jwt_roles_claim: str = "roles"
+    jwt_permissions_claim: str = "permissions"
+    jwt_clock_skew_seconds: int = 30
     webhook_secret: str | None = None
     require_auth_in_production: bool = True
     database_url: str | None = None

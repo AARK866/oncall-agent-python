@@ -481,6 +481,7 @@ class ChatResponse(BaseModel):
 
 class DiagnosisTaskRecord(BaseModel):
     task_id: str
+    tenant_id: str = "default"
     alert_group_id: str | None = None
     rerun_of_task_id: str | None = None
     resume_of_task_id: str | None = None

@@ -10,6 +10,7 @@ from sqlalchemy.engine import CursorResult, Row, URL, make_url
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
+from app.security_context import current_tenant_id, has_system_database_access
 from app.storage.schema import metadata
 
 
@@ -65,6 +66,20 @@ class DatabaseConnection:
 
     def __enter__(self) -> "DatabaseConnection":
         self._connection = self._engine.connect()
+        if self.dialect == "postgresql":
+            self._connection.execute(
+                text(
+                    "SELECT "
+                    "set_config('app.tenant_id', :tenant_id, true), "
+                    "set_config('app.system_access', :system_access, true)"
+                ),
+                {
+                    "tenant_id": current_tenant_id(),
+                    "system_access": (
+                        "true" if has_system_database_access() else "false"
+                    ),
+                },
+            )
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:

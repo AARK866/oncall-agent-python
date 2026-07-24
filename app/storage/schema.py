@@ -23,9 +23,20 @@ metadata = MetaData(
 )
 
 
+def _tenant_column(*, primary_key: bool = False) -> Column:
+    return Column(
+        "tenant_id",
+        Text,
+        primary_key=primary_key,
+        nullable=False,
+        server_default=text("'default'"),
+    )
+
+
 incidents = Table(
     "incidents",
     metadata,
+    _tenant_column(),
     Column("incident_id", Text, primary_key=True),
     Column("title", Text, nullable=False),
     Column("service", Text, nullable=False),
@@ -47,6 +58,7 @@ Index(
 diagnoses = Table(
     "diagnoses",
     metadata,
+    _tenant_column(),
     Column("diagnosis_id", Text, primary_key=True),
     Column(
         "incident_id",
@@ -72,6 +84,7 @@ Index(
 knowledge_index_manifest = Table(
     "knowledge_index_manifest",
     metadata,
+    _tenant_column(primary_key=True),
     Column("namespace", Text, primary_key=True),
     Column("doc_id", Text, primary_key=True),
     Column("source_uri", Text, nullable=False),
@@ -90,6 +103,7 @@ Index(
 knowledge_ingestion_tasks = Table(
     "knowledge_ingestion_tasks",
     metadata,
+    _tenant_column(),
     Column("task_id", Text, primary_key=True),
     Column("status", Text, nullable=False),
     Column("request_json", Text, nullable=False),
@@ -112,6 +126,7 @@ Index(
 knowledge_ingestion_attempts = Table(
     "knowledge_ingestion_attempts",
     metadata,
+    _tenant_column(),
     Column(
         "task_id",
         Text,
@@ -136,6 +151,7 @@ Index(
 diagnosis_tasks = Table(
     "diagnosis_tasks",
     metadata,
+    _tenant_column(),
     Column("task_id", Text, primary_key=True),
     Column("alert_group_id", Text),
     Column("rerun_of_task_id", Text),
@@ -183,8 +199,9 @@ Index(
 alert_groups = Table(
     "alert_groups",
     metadata,
+    _tenant_column(),
     Column("group_id", Text, primary_key=True),
-    Column("dedupe_key", Text, nullable=False, unique=True),
+    Column("dedupe_key", Text, nullable=False),
     Column("source", Text, nullable=False),
     Column("title", Text, nullable=False),
     Column("service", Text),
@@ -200,6 +217,11 @@ alert_groups = Table(
     Column("updated_at", Text, nullable=False),
     Column("first_seen_at", Text, nullable=False),
     Column("last_seen_at", Text, nullable=False),
+    UniqueConstraint(
+        "tenant_id",
+        "dedupe_key",
+        name="uq_alert_groups_tenant_dedupe_key",
+    ),
 )
 Index(
     "idx_alert_groups_status_last_seen",
@@ -210,6 +232,7 @@ Index(
 diagnosis_task_events = Table(
     "diagnosis_task_events",
     metadata,
+    _tenant_column(),
     Column("event_id", Text, primary_key=True),
     Column(
         "task_id",
@@ -231,6 +254,7 @@ Index(
 ops_graph_checkpoints = Table(
     "ops_graph_checkpoints",
     metadata,
+    _tenant_column(),
     Column("checkpoint_id", Text, primary_key=True),
     Column(
         "task_id",
@@ -261,6 +285,7 @@ Index(
 human_review_requests = Table(
     "human_review_requests",
     metadata,
+    _tenant_column(),
     Column("review_id", Text, primary_key=True),
     Column(
         "task_id",
@@ -292,6 +317,7 @@ Index(
 workflow_applications = Table(
     "workflow_applications",
     metadata,
+    _tenant_column(),
     Column("app_id", Text, primary_key=True),
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=False, server_default=text("''")),
@@ -308,6 +334,7 @@ Index(
 workflow_drafts = Table(
     "workflow_drafts",
     metadata,
+    _tenant_column(),
     Column("draft_id", Text, primary_key=True),
     Column(
         "app_id",
@@ -325,6 +352,7 @@ workflow_drafts = Table(
 workflow_versions = Table(
     "workflow_versions",
     metadata,
+    _tenant_column(),
     Column("version_id", Text, primary_key=True),
     Column(
         "app_id",
@@ -359,6 +387,7 @@ Index(
 workflow_runs = Table(
     "workflow_runs",
     metadata,
+    _tenant_column(),
     Column("run_id", Text, primary_key=True),
     Column(
         "app_id",
@@ -396,6 +425,7 @@ Index(
 workflow_run_events = Table(
     "workflow_run_events",
     metadata,
+    _tenant_column(),
     Column("event_id", Text, primary_key=True),
     Column(
         "run_id",
@@ -418,6 +448,7 @@ Index(
 workflow_review_requests = Table(
     "workflow_review_requests",
     metadata,
+    _tenant_column(),
     Column("review_id", Text, primary_key=True),
     Column(
         "run_id",
@@ -448,6 +479,7 @@ Index(
 workflow_audit_events = Table(
     "workflow_audit_events",
     metadata,
+    _tenant_column(),
     Column("audit_id", Text, primary_key=True),
     Column(
         "app_id",
@@ -467,3 +499,11 @@ Index(
     workflow_audit_events.c.app_id,
     desc(workflow_audit_events.c.created_at),
 )
+
+
+TENANT_OWNED_TABLES = tuple(metadata.tables.values())
+for _table in TENANT_OWNED_TABLES:
+    Index(
+        f"idx_{_table.name}_tenant",
+        _table.c.tenant_id,
+    )
