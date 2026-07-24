@@ -13,6 +13,8 @@ def test_dockerfile_runs_uvicorn_and_exposes_healthcheck() -> None:
     assert "uvicorn" in dockerfile
     assert "/health" in dockerfile
     assert "USER app" in dockerfile
+    assert "CMD [\"python\", \"-m\", \"uvicorn\"" in dockerfile
+    assert "CMD [\"sh\", \"-c\", \"python -m alembic" not in dockerfile
 
 
 def test_dockerignore_excludes_local_secrets_and_runtime_artifacts() -> None:
@@ -40,6 +42,7 @@ def test_docker_compose_defines_api_and_optional_milvus_profile() -> None:
     assert "beat:" in compose
     assert "TASK_QUEUE_MODE: celery" in compose
     assert "service_completed_successfully" in compose
+    assert "scripts/run_production_migrations.py" in compose
     assert "POSTGRES_APP_USER" in compose
     assert "POSTGRES_APP_PASSWORD" in compose
     assert "init-app-role.sh" in compose
@@ -81,3 +84,47 @@ def test_observability_deployment_files_define_scrape_alerts_and_dashboard() -> 
     assert "OnCallAgentAuditWriteFailure" in alerts
     assert dashboard["uid"] == "oncall-agent-ops"
     assert dashboard["title"] == "OnCall Agent Operations"
+
+
+def test_kubernetes_base_supports_safe_multi_replica_deployment() -> None:
+    base = ROOT / "deploy" / "kubernetes" / "base"
+    api = (base / "api-deployment.yaml").read_text(encoding="utf-8")
+    worker = (base / "worker-deployment.yaml").read_text(encoding="utf-8")
+    beat = (base / "beat-deployment.yaml").read_text(encoding="utf-8")
+    config = (base / "configmap.yaml").read_text(encoding="utf-8")
+    hpa = (base / "api-hpa.yaml").read_text(encoding="utf-8")
+    pdb = (base / "api-pdb.yaml").read_text(encoding="utf-8")
+
+    assert "replicas: 2" in api
+    assert "maxUnavailable: 0" in api
+    assert "readOnlyRootFilesystem: true" in api
+    assert "runAsNonRoot: true" in api
+    assert "startupProbe:" in api
+    assert "readinessProbe:" in api
+    assert "livenessProbe:" in api
+    assert "replicas: 2" in worker
+    assert "--queues=diagnosis,knowledge,maintenance" in worker
+    assert "replicas: 1" in beat
+    assert "type: Recreate" in beat
+    assert "OPS_GRAPH_CHECKPOINTER: postgres" in config
+    assert "WORKFLOW_CHECKPOINTER: postgres" in config
+    assert "minReplicas: 2" in hpa
+    assert "maxReplicas: 10" in hpa
+    assert "minAvailable: 1" in pdb
+
+
+def test_kubernetes_migration_and_secret_templates_are_safe() -> None:
+    deployment = ROOT / "deploy" / "kubernetes"
+    migration = (deployment / "migration-job.yaml").read_text(
+        encoding="utf-8"
+    )
+    secret_example = (deployment / "secret.example.yaml").read_text(
+        encoding="utf-8"
+    )
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+    assert "scripts/run_production_migrations.py" in migration
+    assert "REPLACE_WITH" in secret_example
+    assert "sk-" not in secret_example
+    assert "ghp_" not in secret_example
+    assert "deploy/kubernetes/secret.yaml" in gitignore

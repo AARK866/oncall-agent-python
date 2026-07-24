@@ -271,6 +271,18 @@ def validate_production_security() -> list[str]:
         missing.append("TASK_QUEUE_MODE=celery")
     if not settings.redis_url:
         missing.append("REDIS_URL")
+    if settings.ops_graph_runtime.strip().lower() != "langgraph":
+        missing.append("OPS_GRAPH_RUNTIME=langgraph")
+    if settings.ops_graph_checkpointer.strip().lower() not in {
+        "postgres",
+        "postgresql",
+    }:
+        missing.append("OPS_GRAPH_CHECKPOINTER=postgres")
+    if settings.workflow_checkpointer.strip().lower() not in {
+        "postgres",
+        "postgresql",
+    }:
+        missing.append("WORKFLOW_CHECKPOINTER=postgres")
     if settings.ops_tool_mode.strip().lower() != "real":
         missing.append("OPS_TOOL_MODE=real")
     if not settings.prometheus_base_url:

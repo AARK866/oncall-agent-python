@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import atexit
 from importlib.util import find_spec
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from app.config import settings
@@ -9,6 +11,9 @@ from app.config import settings
 _MEMORY_CHECKPOINTER: Any | None = None
 _SQLITE_CHECKPOINTERS: dict[str, Any] = {}
 _SQLITE_CONTEXTS: dict[str, Any] = {}
+_POSTGRES_CHECKPOINTERS: dict[str, Any] = {}
+_POSTGRES_POOLS: dict[str, Any] = {}
+_POSTGRES_LOCK = Lock()
 
 
 def create_langgraph_checkpointer(
@@ -37,6 +42,14 @@ def create_langgraph_checkpointer(
             ),
             "sqlite",
         )
+    if normalized_mode in {"postgres", "postgresql"}:
+        return (
+            _postgres_checkpointer(
+                settings.database_url,
+                setting_name=setting_name,
+            ),
+            "postgres",
+        )
 
     raise ValueError(f"Unsupported {setting_name}: {mode}")
 
@@ -47,6 +60,10 @@ def is_memory_checkpointer_available() -> bool:
 
 def is_sqlite_checkpointer_available() -> bool:
     return find_spec("langgraph.checkpoint.sqlite") is not None
+
+
+def is_postgres_checkpointer_available() -> bool:
+    return find_spec("langgraph.checkpoint.postgres") is not None
 
 
 def _memory_checkpointer() -> Any:
@@ -87,3 +104,72 @@ def _sqlite_checkpointer(
 
     _SQLITE_CHECKPOINTERS[key] = saver
     return saver
+
+
+def _postgres_checkpointer(
+    database_url: str | None,
+    setting_name: str = "OPS_GRAPH_CHECKPOINTER",
+) -> Any:
+    if not database_url:
+        raise RuntimeError(
+            f"{setting_name}=postgres requires DATABASE_URL."
+        )
+    if not is_postgres_checkpointer_available():
+        raise RuntimeError(
+            f"{setting_name}=postgres requires langgraph-checkpoint-postgres. "
+            "Install it with: pip install -r requirements.txt"
+        )
+
+    connection_uri = _normalize_postgres_uri(database_url)
+    with _POSTGRES_LOCK:
+        if connection_uri in _POSTGRES_CHECKPOINTERS:
+            return _POSTGRES_CHECKPOINTERS[connection_uri]
+
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+
+        pool = ConnectionPool(
+            conninfo=connection_uri,
+            min_size=1,
+            max_size=max(2, settings.database_pool_size),
+            kwargs={
+                "autocommit": True,
+                "prepare_threshold": 0,
+                "row_factory": dict_row,
+            },
+            open=True,
+        )
+        try:
+            pool.wait()
+            saver = PostgresSaver(pool)
+            saver.setup()
+        except Exception:
+            pool.close()
+            raise
+        _POSTGRES_POOLS[connection_uri] = pool
+        _POSTGRES_CHECKPOINTERS[connection_uri] = saver
+        return saver
+
+
+def _normalize_postgres_uri(database_url: str) -> str:
+    normalized = database_url.strip()
+    for sqlalchemy_scheme in (
+        "postgresql+psycopg://",
+        "postgresql+psycopg2://",
+    ):
+        if normalized.startswith(sqlalchemy_scheme):
+            return "postgresql://" + normalized[len(sqlalchemy_scheme):]
+    if normalized.startswith(("postgresql://", "postgres://")):
+        return normalized
+    raise RuntimeError(
+        "LangGraph PostgreSQL checkpointer requires a PostgreSQL DATABASE_URL."
+    )
+
+
+@atexit.register
+def _close_postgres_pools() -> None:
+    for pool in list(_POSTGRES_POOLS.values()):
+        pool.close()
+    _POSTGRES_POOLS.clear()
+    _POSTGRES_CHECKPOINTERS.clear()

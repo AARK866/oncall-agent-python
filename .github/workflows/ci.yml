@@ -35,6 +35,9 @@ jobs:
       - name: Run tests
         run: python -m pytest
 
+      - name: Validate failure drill plan
+        run: python scripts/run_failure_drills.py
+
   docker-build:
     name: Build Docker Image
     runs-on: ubuntu-latest

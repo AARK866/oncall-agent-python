@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: oncall-agent-api
+  namespace: oncall-agent
+  labels:
+    app.kubernetes.io/name: oncall-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oncall-agent
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      bearerTokenSecret:
+        name: oncall-agent-secrets
+        key: METRICS_AUTH_TOKEN

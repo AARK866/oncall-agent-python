@@ -53,7 +53,7 @@ services:
       APP_ENV: ${APP_ENV:-production}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_APP_USER:-oncall_app}:${POSTGRES_APP_PASSWORD:-oncall_app_dev_password}@postgres:5432/${POSTGRES_DB:-oncall_agent}
       DATABASE_AUTO_CREATE_SCHEMA: "false"
-    command: ["python", "-m", "alembic", "upgrade", "head"]
+    command: ["python", "scripts/run_production_migrations.py"]
     depends_on:
       postgres:
         condition: service_healthy

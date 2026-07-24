@@ -120,6 +120,22 @@ def test_production_config_requires_protected_metrics_and_persistent_audit(
     assert "AUDIT_PERSIST_ENABLED=true" in result.detail
 
 
+def test_production_config_requires_distributed_langgraph_state(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "ops_graph_runtime", "local")
+    monkeypatch.setattr(settings, "ops_graph_checkpointer", "memory")
+    monkeypatch.setattr(settings, "workflow_checkpointer", "sqlite")
+
+    result = asyncio.run(_check_config())
+
+    assert result.status == "FAIL"
+    assert "OPS_GRAPH_RUNTIME=langgraph" in result.detail
+    assert "OPS_GRAPH_CHECKPOINTER=postgres" in result.detail
+    assert "WORKFLOW_CHECKPOINTER=postgres" in result.detail
+
+
 def test_redact_text_hides_security_secrets(monkeypatch) -> None:
     monkeypatch.setattr(settings, "api_token", "api-secret")
     monkeypatch.setattr(settings, "webhook_secret", "webhook-secret")

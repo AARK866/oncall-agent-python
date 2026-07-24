@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oncall-agent-beat
+  namespace: oncall-agent
+  labels:
+    app.kubernetes.io/name: oncall-agent
+    app.kubernetes.io/component: beat
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oncall-agent
+      app.kubernetes.io/component: beat
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oncall-agent
+        app.kubernetes.io/component: beat
+    spec:
+      serviceAccountName: oncall-agent
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: beat
+          image: oncall-agent-python:0.1.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - celery
+            - -A
+            - app.tasks.celery_app:celery_app
+            - beat
+            - --loglevel=INFO
+            - --schedule=/app/celerybeat/celerybeat-schedule
+          envFrom:
+            - configMapRef:
+                name: oncall-agent-config
+            - secretRef:
+                name: oncall-agent-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: beat-state
+              mountPath: /app/celerybeat
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: beat-state
+          emptyDir: {}

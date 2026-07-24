@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oncall-agent-config
+  namespace: oncall-agent
+data:
+  APP_NAME: OnCall Agent Python
+  APP_ENV: production
+  APP_VERSION: 0.1.0
+  LOG_LEVEL: INFO
+  LOG_FORMAT: json
+  API_AUTH_ENABLED: "true"
+  AUTH_MODE: api-token
+  REQUIRE_AUTH_IN_PRODUCTION: "true"
+  DATABASE_AUTO_CREATE_SCHEMA: "false"
+  TASK_QUEUE_MODE: celery
+  OPS_GRAPH_RUNTIME: langgraph
+  OPS_GRAPH_CHECKPOINTER: postgres
+  WORKFLOW_CHECKPOINTER: postgres
+  LLM_PROVIDER: langchain-openai
+  LLM_MODEL: deepseek-chat
+  LLM_BASE_URL: https://api.deepseek.com
+  EMBEDDING_PROVIDER: openai-compatible
+  EMBEDDING_MODEL: bge-m3
+  EMBEDDING_DIMENSIONS: "1024"
+  EMBEDDING_BASE_URL: http://embedding.oncall-platform.svc.cluster.local:11434/v1
+  KNOWLEDGE_RETRIEVER_MODE: vector
+  KNOWLEDGE_VECTOR_STORE: milvus
+  OPS_TOOL_MODE: real
+  PROMETHEUS_BASE_URL: http://prometheus.monitoring.svc.cluster.local:9090
+  LOKI_BASE_URL: http://loki.monitoring.svc.cluster.local:3100
+  GITHUB_REPO: your-org/oncall-agent-python
+  GITHUB_BRANCH: main
+  METRICS_ENABLED: "true"
+  AUDIT_ENABLED: "true"
+  AUDIT_PERSIST_ENABLED: "true"
+  AUDIT_RETENTION_DAYS: "180"

@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agents.langgraph_checkpointing import (
+    _normalize_postgres_uri,
     create_langgraph_checkpointer,
     is_sqlite_checkpointer_available,
 )
@@ -216,6 +217,17 @@ def test_sqlite_langgraph_checkpointer_requires_optional_package(tmp_path) -> No
             "sqlite",
             sqlite_path=str(tmp_path / "langgraph-checkpoints.sqlite"),
         )
+
+
+def test_postgres_checkpointer_normalizes_sqlalchemy_psycopg_url() -> None:
+    assert _normalize_postgres_uri(
+        "postgresql+psycopg://app:secret@postgres:5432/oncall"
+    ) == "postgresql://app:secret@postgres:5432/oncall"
+
+
+def test_postgres_checkpointer_rejects_non_postgres_url() -> None:
+    with pytest.raises(RuntimeError, match="PostgreSQL DATABASE_URL"):
+        _normalize_postgres_uri("sqlite:///app.db")
 
 
 def _approve_pending_reviews(task_id: str) -> dict:

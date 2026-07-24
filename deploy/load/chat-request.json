@@ -1,0 +1,5 @@
+{
+  "message": "payment-api 5xx increased. Diagnose the likely cause and recommend safe next actions.",
+  "session_id": "staging-load-test",
+  "mode": "ops"
+}
