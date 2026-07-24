@@ -95,3 +95,35 @@ characters is configured.
 ```
 
 Fault injection is rejected when `PAYMENT_API_ENV=production`.
+
+## Enable automatic Alertmanager delivery
+
+Set one long token in the OnCall Agent `.env`:
+
+```env
+ALERTMANAGER_WEBHOOK_TOKEN=replace-with-a-long-random-token
+```
+
+Synchronize the same token to the Docker secret file:
+
+```powershell
+$env:ALERTMANAGER_WEBHOOK_TOKEN="replace-with-a-long-random-token"
+.\scripts\configure_alertmanager_webhook.ps1 `
+  -Token $env:ALERTMANAGER_WEBHOOK_TOKEN
+```
+
+Restart the Agent so it loads the token, then recreate the local observability
+services:
+
+```powershell
+docker compose `
+  -f deploy/observability/docker-compose.yml `
+  up -d --force-recreate
+```
+
+Verify Alertmanager-to-Agent delivery without waiting for a metric threshold:
+
+```powershell
+.\.venv\Scripts\python.exe `
+  scripts\check_alertmanager_delivery.py
+```

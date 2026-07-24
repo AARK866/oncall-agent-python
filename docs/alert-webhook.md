@@ -102,13 +102,24 @@ If you are running the FastAPI server manually, use:
 
 ## Alertmanager Config Example
 
+Native Alertmanager does not calculate an HMAC over each webhook body. Configure
+the dedicated `ALERTMANAGER_WEBHOOK_TOKEN` and use its Bearer authorization:
+
 ```yaml
 receivers:
   - name: oncall-agent
     webhook_configs:
       - url: http://host.docker.internal:8000/api/alerts/alertmanager
         send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/alertmanager_webhook_token
 ```
+
+HMAC through `WEBHOOK_SECRET` remains available for webhook senders that can
+calculate dynamic request signatures. If both methods are configured, either a
+valid dedicated Bearer token or a valid HMAC signature is accepted.
 
 For Linux Docker networking, replace `host.docker.internal` with the API host or container
 service name used by your deployment.

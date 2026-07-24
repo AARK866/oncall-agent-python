@@ -1,0 +1,76 @@
+groups:
+  - name: payment-api-availability
+    rules:
+      - alert: PaymentApiDown
+        expr: up{job="payment-api"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: payment-api
+          team: payments
+        annotations:
+          summary: Payment API is unavailable
+          description: Prometheus has failed to scrape payment-api for 30 seconds.
+          runbook: app/data/runbooks/payment_5xx.md
+
+  - name: payment-api-traffic
+    rules:
+      - alert: PaymentApiHigh5xxRatio
+        expr: |
+          (
+            sum(
+              rate(
+                http_requests_total{
+                  service="payment-api",
+                  path="/pay",
+                  status=~"5.."
+                }[1m]
+              )
+            )
+            /
+            clamp_min(
+              sum(
+                rate(
+                  http_requests_total{
+                    service="payment-api",
+                    path="/pay"
+                  }[1m]
+                )
+              ),
+              0.001
+            )
+          ) > 0.20
+        for: 30s
+        labels:
+          severity: critical
+          service: payment-api
+          team: payments
+          incident_type: 5xx
+        annotations:
+          summary: Payment API 5xx ratio is above 20 percent
+          description: The /pay 5xx ratio has stayed above 20 percent for 30 seconds.
+          runbook: app/data/runbooks/payment_5xx.md
+
+      - alert: PaymentApiHighP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(
+              rate(
+                http_request_duration_seconds_bucket{
+                  service="payment-api",
+                  path="/pay"
+                }[1m]
+              )
+            ) by (le)
+          ) > 1.5
+        for: 30s
+        labels:
+          severity: warning
+          service: payment-api
+          team: payments
+          incident_type: latency
+        annotations:
+          summary: Payment API p95 latency is above 1.5 seconds
+          description: The /pay p95 latency has stayed above 1.5 seconds for 30 seconds.
+          runbook: app/data/runbooks/order_timeout.md

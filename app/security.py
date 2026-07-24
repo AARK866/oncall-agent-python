@@ -133,9 +133,18 @@ async def require_auth_principal(request: Request) -> AuthPrincipal:
 
 
 async def require_webhook_auth(request: Request) -> None:
+    token = settings.alertmanager_webhook_token
+    if token:
+        provided = _extract_bearer_token(request)
+        if provided and hmac.compare_digest(provided, token):
+            return
+
     if settings.webhook_secret:
         await verify_webhook_signature(request)
         return
+
+    if token:
+        raise _unauthorized("Invalid Alertmanager webhook token.")
 
     await require_api_token(request)
 
@@ -261,8 +270,13 @@ def validate_production_security() -> list[str]:
 
     if mode not in {"api-token", "jwt"}:
         missing.append("AUTH_MODE=jwt")
-    if not settings.webhook_secret:
-        missing.append("WEBHOOK_SECRET")
+    if (
+        not settings.webhook_secret
+        and not settings.alertmanager_webhook_token
+    ):
+        missing.append(
+            "WEBHOOK_SECRET or ALERTMANAGER_WEBHOOK_TOKEN"
+        )
     if not settings.database_url:
         missing.append("DATABASE_URL")
     if settings.database_auto_create_schema:
@@ -468,6 +482,7 @@ def _configured_secrets() -> list[str]:
             settings.jwt_secret,
             settings.metrics_auth_token,
             settings.webhook_secret,
+            settings.alertmanager_webhook_token,
             settings.database_url,
             settings.redis_url,
             settings.prometheus_bearer_token,

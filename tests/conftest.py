@@ -42,6 +42,11 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "jwt_permissions_claim", "permissions")
     monkeypatch.setattr(settings, "jwt_clock_skew_seconds", 30)
     monkeypatch.setattr(settings, "webhook_secret", None)
+    monkeypatch.setattr(
+        settings,
+        "alertmanager_webhook_token",
+        None,
+    )
     monkeypatch.setattr(settings, "require_auth_in_production", True)
     monkeypatch.setattr(settings, "database_url", None)
     monkeypatch.setattr(settings, "database_pool_size", 5)

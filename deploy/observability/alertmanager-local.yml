@@ -1,0 +1,23 @@
+global:
+  resolve_timeout: 1m
+
+route:
+  receiver: oncall-agent
+  group_by:
+    - alertname
+    - service
+    - severity
+  group_wait: 5s
+  group_interval: 20s
+  repeat_interval: 30m
+
+receivers:
+  - name: oncall-agent
+    webhook_configs:
+      - url: http://host.docker.internal:8000/api/alerts/alertmanager
+        send_resolved: true
+        max_alerts: 20
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/alertmanager_webhook_token

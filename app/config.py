@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     jwt_permissions_claim: str = "permissions"
     jwt_clock_skew_seconds: int = 30
     webhook_secret: str | None = None
+    alertmanager_webhook_token: str | None = None
     require_auth_in_production: bool = True
     database_url: str | None = None
     database_pool_size: int = 10

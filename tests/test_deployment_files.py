@@ -98,13 +98,36 @@ def test_observability_deployment_files_define_scrape_alerts_and_dashboard() -> 
     local_compose = (
         ROOT / "deploy" / "observability" / "docker-compose.yml"
     ).read_text(encoding="utf-8")
+    payment_alerts = (
+        ROOT
+        / "deploy"
+        / "observability"
+        / "payment-api-alerts.yml"
+    ).read_text(encoding="utf-8")
+    alertmanager = (
+        ROOT
+        / "deploy"
+        / "observability"
+        / "alertmanager-local.yml"
+    ).read_text(encoding="utf-8")
 
     assert "host.docker.internal:8000" in local_prometheus
     assert "host.docker.internal:8010" in local_prometheus
+    assert "alertmanager:9093" in local_prometheus
+    assert "payment-api-alerts.yml" in local_prometheus
     assert "service: oncall-agent" in local_prometheus
     assert "schema: v13" in local_loki
     assert "oncall-prometheus" in local_compose
     assert "oncall-loki" in local_compose
+    assert "oncall-alertmanager" in local_compose
+    assert "alertmanager_webhook_token" in local_compose
+    assert "PaymentApiDown" in payment_alerts
+    assert "PaymentApiHigh5xxRatio" in payment_alerts
+    assert "PaymentApiHighP95Latency" in payment_alerts
+    assert 'status=~"5.."' in payment_alerts
+    assert "/api/alerts/alertmanager" in alertmanager
+    assert "send_resolved: true" in alertmanager
+    assert "credentials_file:" in alertmanager
 
 
 def test_kubernetes_base_supports_safe_multi_replica_deployment() -> None:

@@ -11,6 +11,8 @@ env/
 .env
 .env.local
 deploy/kubernetes/secret.yaml
+deploy/observability/secrets/*
+!deploy/observability/secrets/.gitkeep
 
 .pytest_cache/
 .mypy_cache/

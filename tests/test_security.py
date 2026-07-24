@@ -75,6 +75,49 @@ def test_alertmanager_webhook_accepts_valid_signature(monkeypatch) -> None:
     assert response.status_code == 202
 
 
+def test_alertmanager_webhook_accepts_dedicated_bearer_token(
+    monkeypatch,
+) -> None:
+    token = "alertmanager-webhook-token"
+    monkeypatch.setattr(
+        settings,
+        "alertmanager_webhook_token",
+        token,
+    )
+    monkeypatch.setattr(
+        settings,
+        "webhook_secret",
+        "hmac-remains-supported",
+    )
+
+    response = client.post(
+        "/api/alerts/alertmanager",
+        json=_alertmanager_payload(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 202
+
+
+def test_alertmanager_webhook_rejects_invalid_dedicated_token(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        settings,
+        "alertmanager_webhook_token",
+        "alertmanager-webhook-token",
+    )
+    monkeypatch.setattr(settings, "webhook_secret", None)
+
+    response = client.post(
+        "/api/alerts/alertmanager",
+        json=_alertmanager_payload(),
+        headers={"Authorization": "Bearer incorrect-token"},
+    )
+
+    assert response.status_code == 401
+
+
 def test_production_config_reports_missing_security_settings(monkeypatch) -> None:
     monkeypatch.setattr(settings, "app_env", "production")
     monkeypatch.setattr(settings, "api_token", None)
@@ -85,6 +128,26 @@ def test_production_config_reports_missing_security_settings(monkeypatch) -> Non
     assert result.status == "FAIL"
     assert "API_TOKEN" in result.detail
     assert "WEBHOOK_SECRET" in result.detail
+
+
+def test_production_security_accepts_alertmanager_token(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "api_token", "api-token")
+    monkeypatch.setattr(settings, "webhook_secret", None)
+    monkeypatch.setattr(
+        settings,
+        "alertmanager_webhook_token",
+        "alertmanager-webhook-token",
+    )
+
+    result = asyncio.run(_check_config())
+
+    assert (
+        "WEBHOOK_SECRET or ALERTMANAGER_WEBHOOK_TOKEN"
+        not in result.detail
+    )
 
 
 def test_production_config_rejects_mock_ops_backends(monkeypatch) -> None:
@@ -139,8 +202,18 @@ def test_production_config_requires_distributed_langgraph_state(
 def test_redact_text_hides_security_secrets(monkeypatch) -> None:
     monkeypatch.setattr(settings, "api_token", "api-secret")
     monkeypatch.setattr(settings, "webhook_secret", "webhook-secret")
+    monkeypatch.setattr(
+        settings,
+        "alertmanager_webhook_token",
+        "alertmanager-secret",
+    )
 
-    assert redact_text("api-secret webhook-secret") == "*** ***"
+    assert (
+        redact_text(
+            "api-secret webhook-secret alertmanager-secret"
+        )
+        == "*** *** ***"
+    )
 
 
 def _alertmanager_payload() -> dict:

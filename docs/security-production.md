@@ -65,6 +65,16 @@ signature = "sha256=" + hmac.new(
 If `WEBHOOK_SECRET` is empty, the webhook endpoint falls back to API token protection
 when API authentication is enabled.
 
+Native Alertmanager can instead use a dedicated Bearer credential:
+
+```env
+ALERTMANAGER_WEBHOOK_TOKEN=replace-with-a-long-random-token
+```
+
+This token is checked before HMAC validation and is redacted from application
+logs. Production validation accepts either `WEBHOOK_SECRET` or
+`ALERTMANAGER_WEBHOOK_TOKEN`.
+
 ## Production Check
 
 Run:
