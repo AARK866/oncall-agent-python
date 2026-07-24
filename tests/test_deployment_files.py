@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -58,3 +59,25 @@ def test_github_actions_runs_tests_and_docker_build() -> None:
     assert "python -m pytest" in workflow
     assert "docker build" in workflow
     assert "scripts/check_enterprise_stack.py --config-only" in workflow
+
+
+def test_observability_deployment_files_define_scrape_alerts_and_dashboard() -> None:
+    prometheus = (
+        ROOT / "deploy" / "observability" / "prometheus.yml"
+    ).read_text(encoding="utf-8")
+    alerts = (
+        ROOT / "deploy" / "observability" / "oncall-agent-alerts.yml"
+    ).read_text(encoding="utf-8")
+    dashboard = json.loads(
+        (
+            ROOT / "deploy" / "observability" / "grafana-dashboard.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert "/metrics" in prometheus
+    assert "credentials_file" in prometheus
+    assert "oncall-agent-alerts.yml" in prometheus
+    assert "OnCallAgentDown" in alerts
+    assert "OnCallAgentAuditWriteFailure" in alerts
+    assert dashboard["uid"] == "oncall-agent-ops"
+    assert dashboard["title"] == "OnCall Agent Operations"

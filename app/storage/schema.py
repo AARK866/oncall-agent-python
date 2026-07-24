@@ -500,6 +500,38 @@ Index(
     desc(workflow_audit_events.c.created_at),
 )
 
+audit_events = Table(
+    "audit_events",
+    metadata,
+    _tenant_column(),
+    Column("audit_id", Text, primary_key=True),
+    Column("event_type", Text, nullable=False),
+    Column("actor", Text, nullable=False),
+    Column("source", Text, nullable=False),
+    Column("action", Text, nullable=False),
+    Column("resource_type", Text, nullable=False),
+    Column("resource_id", Text),
+    Column("outcome", Text, nullable=False),
+    Column("trace_id", Text, nullable=False),
+    Column("request_method", Text),
+    Column("request_path", Text),
+    Column("status_code", Integer),
+    Column("duration_ms", Integer),
+    Column("client_ip", Text),
+    Column("metadata_json", Text, nullable=False),
+    Column("created_at", Text, nullable=False),
+)
+Index(
+    "idx_audit_events_event_created",
+    audit_events.c.event_type,
+    desc(audit_events.c.created_at),
+)
+Index(
+    "idx_audit_events_outcome_created",
+    audit_events.c.outcome,
+    desc(audit_events.c.created_at),
+)
+
 
 TENANT_OWNED_TABLES = tuple(metadata.tables.values())
 for _table in TENANT_OWNED_TABLES:

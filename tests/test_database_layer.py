@@ -51,6 +51,7 @@ def test_alembic_migration_creates_and_drops_enterprise_schema(
         "knowledge_index_manifest",
         "workflow_applications",
         "workflow_runs",
+        "audit_events",
     }.issubset(table_names)
     assert "tenant_id" in {
         column["name"]
@@ -87,6 +88,7 @@ def test_alembic_migration_renders_for_postgresql(monkeypatch) -> None:
     assert "ENABLE ROW LEVEL SECURITY" in migration_sql
     assert "FORCE ROW LEVEL SECURITY" in migration_sql
     assert "CREATE POLICY tenant_isolation" in migration_sql
+    assert "CREATE TABLE audit_events" in migration_sql
 
 
 def test_store_uses_migrated_database_without_runtime_schema_creation(

@@ -11,7 +11,11 @@ from app.storage import SQLiteTaskStore
 from app.tasks.celery_app import celery_app
 from app.tasks.dispatcher import TaskDispatchError, TaskDispatcher
 from app.tasks.redis_coordination import RedisCoordinator
-from app.tasks.worker_tasks import health_ping, recover_stale_tasks
+from app.tasks.worker_tasks import (
+    cleanup_audit_events,
+    health_ping,
+    recover_stale_tasks,
+)
 
 
 client = TestClient(app)
@@ -197,6 +201,29 @@ def test_celery_routes_and_health_task_are_registered() -> None:
     assert health_ping.run("distributed-probe") == {
         "status": "ok",
         "probe": "distributed-probe",
+    }
+    assert (
+        celery_app.conf.task_routes[
+            "oncall.maintenance.cleanup_audit"
+        ]["queue"]
+        == "maintenance"
+    )
+
+
+def test_audit_cleanup_uses_configured_retention(monkeypatch) -> None:
+    class FakeAuditStore:
+        def delete_expired(self):
+            return 7
+
+    monkeypatch.setattr(
+        "app.tasks.worker_tasks.AuditStore.from_settings",
+        lambda: FakeAuditStore(),
+    )
+    monkeypatch.setattr(settings, "audit_retention_days", 90)
+
+    assert cleanup_audit_events.run() == {
+        "deleted": 7,
+        "retention_days": 90,
     }
 
 

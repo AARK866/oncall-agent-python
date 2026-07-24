@@ -103,6 +103,23 @@ def test_production_config_rejects_mock_ops_backends(monkeypatch) -> None:
     assert "GITHUB_REPO" in result.detail
 
 
+def test_production_config_requires_protected_metrics_and_persistent_audit(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "metrics_enabled", True)
+    monkeypatch.setattr(settings, "metrics_auth_token", None)
+    monkeypatch.setattr(settings, "audit_enabled", False)
+    monkeypatch.setattr(settings, "audit_persist_enabled", False)
+
+    result = asyncio.run(_check_config())
+
+    assert result.status == "FAIL"
+    assert "METRICS_AUTH_TOKEN" in result.detail
+    assert "AUDIT_ENABLED=true" in result.detail
+    assert "AUDIT_PERSIST_ENABLED=true" in result.detail
+
+
 def test_redact_text_hides_security_secrets(monkeypatch) -> None:
     monkeypatch.setattr(settings, "api_token", "api-secret")
     monkeypatch.setattr(settings, "webhook_secret", "webhook-secret")

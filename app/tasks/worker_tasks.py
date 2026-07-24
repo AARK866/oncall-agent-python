@@ -7,6 +7,7 @@ from redis.exceptions import RedisError
 from sqlalchemy.exc import OperationalError
 
 from app.config import settings
+from app.observability.audit import AuditStore
 from app.security_context import (
     system_database_scope,
     tenant_scope,
@@ -18,6 +19,7 @@ from app.schemas import (
 from app.tasks.celery_app import celery_app
 from app.tasks.diagnosis_queue import DiagnosisTaskQueue
 from app.tasks.dispatcher import (
+    AUDIT_CLEANUP_TASK_NAME,
     DIAGNOSIS_TASK_NAME,
     HEALTH_TASK_NAME,
     KNOWLEDGE_TASK_NAME,
@@ -147,3 +149,13 @@ def recover_stale_tasks() -> dict[str, Any]:
 @celery_app.task(name=HEALTH_TASK_NAME)
 def health_ping(probe: str = "ping") -> dict[str, str]:
     return {"status": "ok", "probe": probe}
+
+
+@celery_app.task(name=AUDIT_CLEANUP_TASK_NAME)
+def cleanup_audit_events() -> dict[str, int]:
+    with system_database_scope():
+        deleted = AuditStore.from_settings().delete_expired()
+    return {
+        "deleted": deleted,
+        "retention_days": settings.audit_retention_days,
+    }

@@ -1,8 +1,12 @@
+import logging
 from time import perf_counter
 
+from app.observability.metrics import observe_tool_call
 from app.reliability import RetryError, RetryPolicy, run_with_retry
 from app.schemas import ToolCall, ToolResult
 from app.tools.base import BaseTool
+
+logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -44,6 +48,12 @@ class ToolRegistry:
     async def execute(self, tool_call: ToolCall) -> ToolResult:
         tool = self.get(tool_call.name)
         if tool is None:
+            observe_tool_call(
+                tool_name=tool_call.name,
+                connector=self.connector_name,
+                success=False,
+                duration_seconds=0,
+            )
             return ToolResult(
                 tool_name=tool_call.name,
                 success=False,
@@ -57,20 +67,54 @@ class ToolRegistry:
                 policy=self.retry_policy,
             )
             data = self._with_retry_metadata(outcome.value, outcome.metadata())
-            return ToolResult(
+            elapsed_seconds = perf_counter() - started_at
+            result = ToolResult(
                 tool_name=tool_call.name,
                 success=True,
                 data=data,
-                elapsed_ms=self._elapsed_ms(started_at),
+                elapsed_ms=int(elapsed_seconds * 1000),
             )
+            observe_tool_call(
+                tool_name=tool_call.name,
+                connector=self.connector_name,
+                success=True,
+                duration_seconds=elapsed_seconds,
+            )
+            logger.info(
+                "Agent tool completed.",
+                extra={
+                    "event": "tool.call",
+                    "outcome": "success",
+                    "tool_name": tool_call.name,
+                    "duration_ms": result.elapsed_ms,
+                },
+            )
+            return result
         except RetryError as exc:
-            return ToolResult(
+            elapsed_seconds = perf_counter() - started_at
+            result = ToolResult(
                 tool_name=tool_call.name,
                 success=False,
                 data={"_retry": exc.metadata()},
                 error=str(exc.last_error),
-                elapsed_ms=self._elapsed_ms(started_at),
+                elapsed_ms=int(elapsed_seconds * 1000),
             )
+            observe_tool_call(
+                tool_name=tool_call.name,
+                connector=self.connector_name,
+                success=False,
+                duration_seconds=elapsed_seconds,
+            )
+            logger.warning(
+                "Agent tool failed.",
+                extra={
+                    "event": "tool.call",
+                    "outcome": "failure",
+                    "tool_name": tool_call.name,
+                    "duration_ms": result.elapsed_ms,
+                },
+            )
+            return result
 
     def _elapsed_ms(self, started_at: float) -> int:
         return int((perf_counter() - started_at) * 1000)

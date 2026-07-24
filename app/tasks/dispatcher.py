@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Any
 from uuid import uuid4
 
 from app.config import settings
+from app.observability.metrics import observe_task_dispatch
 from app.security_context import current_tenant_id, tenant_scope
 from app.tasks.redis_coordination import RedisCoordinator
 
@@ -12,6 +14,9 @@ DIAGNOSIS_TASK_NAME = "oncall.tasks.run_diagnosis"
 KNOWLEDGE_TASK_NAME = "oncall.tasks.run_knowledge_ingestion"
 HEALTH_TASK_NAME = "oncall.health.ping"
 RECOVERY_TASK_NAME = "oncall.tasks.recover_stale"
+AUDIT_CLEANUP_TASK_NAME = "oncall.maintenance.cleanup_audit"
+
+logger = logging.getLogger(__name__)
 
 
 class TaskDispatchError(RuntimeError):
@@ -90,6 +95,12 @@ class TaskDispatcher:
                 _tenant_local_runner(task_kind, tenant_id),
                 business_task_id,
             )
+            _record_dispatch(
+                task_kind=task_kind,
+                mode=self.mode,
+                outcome="scheduled",
+                task_id=business_task_id,
+            )
             return DispatchReceipt(
                 business_task_id=business_task_id,
                 task_kind=task_kind,
@@ -98,6 +109,12 @@ class TaskDispatcher:
             )
 
         if self.mode != "celery":
+            _record_dispatch(
+                task_kind=task_kind,
+                mode=self.mode,
+                outcome="invalid_mode",
+                task_id=business_task_id,
+            )
             raise ValueError(f"Unsupported TASK_QUEUE_MODE: {self.mode}")
 
         coordinator = self.coordinator or RedisCoordinator()
@@ -108,8 +125,20 @@ class TaskDispatcher:
                 business_task_id,
             )
         except Exception as exc:
+            _record_dispatch(
+                task_kind=task_kind,
+                mode=self.mode,
+                outcome="broker_failure",
+                task_id=business_task_id,
+            )
             raise TaskDispatchError(task_kind, business_task_id) from exc
         if reservation is None:
+            _record_dispatch(
+                task_kind=task_kind,
+                mode=self.mode,
+                outcome="duplicate",
+                task_id=business_task_id,
+            )
             return DispatchReceipt(
                 business_task_id=business_task_id,
                 task_kind=task_kind,
@@ -145,8 +174,20 @@ class TaskDispatcher:
                 coordinator.release_dispatch(reservation)
             except Exception:
                 pass
+            _record_dispatch(
+                task_kind=task_kind,
+                mode=self.mode,
+                outcome="publish_failure",
+                task_id=business_task_id,
+            )
             raise TaskDispatchError(task_kind, business_task_id) from exc
 
+        _record_dispatch(
+            task_kind=task_kind,
+            mode=self.mode,
+            outcome="scheduled",
+            task_id=business_task_id,
+        )
         return DispatchReceipt(
             business_task_id=business_task_id,
             task_kind=task_kind,
@@ -182,3 +223,26 @@ def _celery_application():
     from app.tasks.celery_app import celery_app
 
     return celery_app
+
+
+def _record_dispatch(
+    *,
+    task_kind: str,
+    mode: str,
+    outcome: str,
+    task_id: str,
+) -> None:
+    observe_task_dispatch(
+        task_kind=task_kind,
+        mode=mode,
+        outcome=outcome,
+    )
+    logger.info(
+        "Background task dispatch completed.",
+        extra={
+            "event": "task.dispatch",
+            "outcome": outcome,
+            "task_kind": task_kind,
+            "task_id": task_id,
+        },
+    )

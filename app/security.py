@@ -24,6 +24,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "sre": frozenset(
         {
             "alerts:read",
+            "audit:read",
             "alerts:write",
             "auth:read",
             "chat:execute",
@@ -210,6 +211,8 @@ def required_permission(request: Request) -> str | None:
     method = request.method.upper()
     if path.startswith("/api/auth"):
         return "auth:read"
+    if path.startswith("/api/audit-events"):
+        return "audit:read"
     if path.startswith("/api/chat"):
         return "chat:execute"
     if path.startswith("/api/alerts"):
@@ -276,6 +279,12 @@ def validate_production_security() -> list[str]:
         missing.append("LOKI_BASE_URL")
     if not settings.github_repo:
         missing.append("GITHUB_REPO")
+    if not settings.audit_enabled:
+        missing.append("AUDIT_ENABLED=true")
+    if not settings.audit_persist_enabled:
+        missing.append("AUDIT_PERSIST_ENABLED=true")
+    if settings.metrics_enabled and not settings.metrics_auth_token:
+        missing.append("METRICS_AUTH_TOKEN")
     return sorted(set(missing))
 
 
@@ -445,6 +454,7 @@ def _configured_secrets() -> list[str]:
         for secret in [
             settings.api_token,
             settings.jwt_secret,
+            settings.metrics_auth_token,
             settings.webhook_secret,
             settings.database_url,
             settings.redis_url,

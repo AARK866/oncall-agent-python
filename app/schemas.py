@@ -679,6 +679,26 @@ class OpsToolHealthResponse(BaseModel):
     message: str
 
 
+class AuditEventRecord(BaseModel):
+    audit_id: str
+    tenant_id: str = "default"
+    event_type: str
+    actor: str
+    source: str
+    action: str
+    resource_type: str
+    resource_id: str | None = None
+    outcome: str
+    trace_id: str
+    request_method: str | None = None
+    request_path: str | None = None
+    status_code: int | None = None
+    duration_ms: int | None = None
+    client_ip: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ReactStep(BaseModel):
     thought: str
     action: ToolCall | None = None

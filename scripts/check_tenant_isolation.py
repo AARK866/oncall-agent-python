@@ -27,6 +27,7 @@ def main() -> int:
 
     engine = create_engine(args.database_url)
     incident_id = f"rls_check_{uuid4().hex}"
+    audit_id = f"audit_rls_check_{uuid4().hex}"
     with engine.connect() as connection:
         transaction = connection.begin()
         role_name, is_superuser, bypasses_rls = connection.execute(
@@ -57,23 +58,50 @@ def main() -> int:
                 ),
                 {"incident_id": incident_id},
             )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO audit_events (
+                        audit_id, event_type, actor, source, action,
+                        resource_type, outcome, trace_id, metadata_json,
+                        created_at
+                    )
+                    VALUES (
+                        :audit_id, 'security.acceptance', 'rls-check',
+                        'script', 'verify_isolation', 'audit_event',
+                        'success', 'rls-check-trace', '{}',
+                        '2026-07-24T00:00:00'
+                    )
+                    """
+                ),
+                {"audit_id": audit_id},
+            )
 
             _set_context(connection, tenant_id="tenant-check-b")
             tenant_b_count = _incident_count(connection, incident_id)
+            tenant_b_audit_count = _audit_count(connection, audit_id)
 
             _set_context(connection, tenant_id="tenant-check-a")
             tenant_a_count = _incident_count(connection, incident_id)
+            tenant_a_audit_count = _audit_count(connection, audit_id)
         finally:
             transaction.rollback()
 
     engine.dispose()
-    passed = tenant_a_count == 1 and tenant_b_count == 0
+    passed = (
+        tenant_a_count == 1
+        and tenant_b_count == 0
+        and tenant_a_audit_count == 1
+        and tenant_b_audit_count == 0
+    )
     print("Tenant RLS acceptance")
     print(f"- database role: {role_name}")
     print(f"- superuser: {is_superuser}")
     print(f"- bypasses RLS: {bypasses_rls}")
     print(f"- tenant-check-a rows: {tenant_a_count}")
     print(f"- tenant-check-b rows: {tenant_b_count}")
+    print(f"- tenant-check-a audit rows: {tenant_a_audit_count}")
+    print(f"- tenant-check-b audit rows: {tenant_b_audit_count}")
     print(f"- status: {'PASS' if passed else 'FAIL'}")
     if is_superuser or bypasses_rls:
         print("- fix: use the dedicated POSTGRES_APP_USER role")
@@ -101,6 +129,18 @@ def _incident_count(connection, incident_id: str) -> int:
                 "WHERE incident_id = :incident_id"
             ),
             {"incident_id": incident_id},
+        ).scalar_one()
+    )
+
+
+def _audit_count(connection, audit_id: str) -> int:
+    return int(
+        connection.execute(
+            text(
+                "SELECT COUNT(*) FROM audit_events "
+                "WHERE audit_id = :audit_id"
+            ),
+            {"audit_id": audit_id},
         ).scalar_one()
     )
 

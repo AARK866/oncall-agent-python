@@ -6,6 +6,18 @@ from app.config import settings
 @pytest.fixture(autouse=True)
 def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "app_env", "local")
+    monkeypatch.setattr(settings, "log_level", "INFO")
+    monkeypatch.setattr(settings, "log_format", "json")
+    monkeypatch.setattr(settings, "metrics_enabled", True)
+    monkeypatch.setattr(settings, "metrics_auth_token", None)
+    monkeypatch.setattr(settings, "audit_enabled", True)
+    monkeypatch.setattr(settings, "audit_persist_enabled", False)
+    monkeypatch.setattr(settings, "audit_retention_days", 180)
+    monkeypatch.setattr(
+        settings,
+        "audit_cleanup_interval_seconds",
+        86400,
+    )
     monkeypatch.setattr(settings, "api_auth_enabled", False)
     monkeypatch.setattr(settings, "api_token", None)
     monkeypatch.setattr(settings, "api_token_subject", "api-client")

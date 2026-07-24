@@ -6,6 +6,14 @@ class Settings(BaseSettings):
     app_env: str = "local"
     app_version: str = "0.1.0"
     api_prefix: str = "/api"
+    log_level: str = "INFO"
+    log_format: str = "json"
+    metrics_enabled: bool = True
+    metrics_auth_token: str | None = None
+    audit_enabled: bool = True
+    audit_persist_enabled: bool = True
+    audit_retention_days: int = 180
+    audit_cleanup_interval_seconds: int = 86400
     api_auth_enabled: bool = False
     api_token: str | None = None
     api_token_subject: str = "api-client"

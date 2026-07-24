@@ -2,6 +2,7 @@ from celery import Celery
 
 from app.config import settings
 from app.tasks.dispatcher import (
+    AUDIT_CLEANUP_TASK_NAME,
     DIAGNOSIS_TASK_NAME,
     HEALTH_TASK_NAME,
     KNOWLEDGE_TASK_NAME,
@@ -40,11 +41,17 @@ celery_app.conf.update(
         KNOWLEDGE_TASK_NAME: {"queue": "knowledge"},
         HEALTH_TASK_NAME: {"queue": "maintenance"},
         RECOVERY_TASK_NAME: {"queue": "maintenance"},
+        AUDIT_CLEANUP_TASK_NAME: {"queue": "maintenance"},
     },
     beat_schedule={
         "recover-stale-diagnosis-tasks": {
             "task": RECOVERY_TASK_NAME,
             "schedule": settings.stale_task_recovery_interval_seconds,
+            "options": {"queue": "maintenance"},
+        },
+        "cleanup-expired-audit-events": {
+            "task": AUDIT_CLEANUP_TASK_NAME,
+            "schedule": settings.audit_cleanup_interval_seconds,
             "options": {"queue": "maintenance"},
         }
     },

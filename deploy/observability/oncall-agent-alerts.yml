@@ -1,0 +1,87 @@
+groups:
+  - name: oncall-agent-availability
+    rules:
+      - alert: OnCallAgentDown
+        expr: up{job="oncall-agent"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: oncall-agent
+        annotations:
+          summary: OnCall Agent API is unavailable
+          description: Prometheus has failed to scrape the API for two minutes.
+
+      - alert: OnCallAgentHighServerErrorRatio
+        expr: |
+          (
+            sum(rate(oncall_http_requests_total{status_class="5xx"}[5m]))
+            /
+            clamp_min(sum(rate(oncall_http_requests_total[5m])), 0.001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: oncall-agent
+        annotations:
+          summary: OnCall Agent server error ratio is above 5 percent
+          description: Investigate API logs using the trace IDs attached to failed requests.
+
+      - alert: OnCallAgentHighP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(oncall_http_request_duration_seconds_bucket[5m])
+            )
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: oncall-agent
+        annotations:
+          summary: OnCall Agent p95 latency is above two seconds
+          description: Check LLM, vector database, and operations tool latency.
+
+  - name: oncall-agent-execution
+    rules:
+      - alert: OnCallAgentToolFailureRatio
+        expr: |
+          (
+            sum(rate(oncall_tool_calls_total{outcome="failure"}[10m]))
+            /
+            clamp_min(sum(rate(oncall_tool_calls_total[10m])), 0.001)
+          ) > 0.20
+        for: 10m
+        labels:
+          severity: warning
+          service: oncall-agent
+        annotations:
+          summary: More than 20 percent of Agent tool calls are failing
+          description: Check Prometheus, Loki, GitHub, Milvus, and retry metadata.
+
+      - alert: OnCallAgentTaskDispatchFailure
+        expr: |
+          sum(
+            increase(
+              oncall_task_dispatches_total{
+                outcome=~"broker_failure|publish_failure|invalid_mode"
+              }[5m]
+            )
+          ) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: oncall-agent
+        annotations:
+          summary: Background task dispatch is failing
+          description: Check Redis, Celery broker connectivity, and task queue mode.
+
+      - alert: OnCallAgentAuditWriteFailure
+        expr: increase(oncall_audit_write_failures_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: oncall-agent
+        annotations:
+          summary: Security audit events cannot be persisted
+          description: Check PostgreSQL connectivity, RLS context, and audit table capacity.
