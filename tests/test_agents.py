@@ -79,6 +79,7 @@ def test_ops_agent_returns_diagnosis_with_traces() -> None:
         "summarize_report",
         "build_response",
         "human_review_gate",
+        "execute_approved_remediation",
         "persist_incident",
     ]
     assert response.metadata["graph_runtime"]["requested"] == "local"

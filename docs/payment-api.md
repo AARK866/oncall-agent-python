@@ -127,3 +127,6 @@ Verify Alertmanager-to-Agent delivery without waiting for a metric threshold:
 .\.venv\Scripts\python.exe `
   scripts\check_alertmanager_delivery.py
 ```
+
+The approved real diagnosis and remediation flow is documented in
+`docs/approved-remediation.md`.

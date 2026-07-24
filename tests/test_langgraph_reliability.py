@@ -59,6 +59,7 @@ def test_alert_task_records_ops_graph_checkpoints() -> None:
         "build_fallback_report",
         "summarize_report",
         "build_response",
+        "execute_approved_remediation",
         "persist_incident",
     ]
     paused_nodes = [

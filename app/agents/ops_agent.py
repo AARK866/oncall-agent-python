@@ -8,6 +8,7 @@ from app.agents.react_loop import ReactLoop
 from app.config import settings
 from app.llm import LLMClient, create_llm_client
 from app.rag.access_control import KnowledgeAccessContext
+from app.remediation import PaymentApiRemediationController
 from app.schemas import (
     AlertSeverity,
     ChatMode,
@@ -30,6 +31,7 @@ class OpsAgent:
         incident_store: SQLiteIncidentStore | None = None,
         llm: LLMClient | None = None,
         should_cancel: Callable[[str], bool] | None = None,
+        remediation: PaymentApiRemediationController | None = None,
     ) -> None:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
@@ -51,6 +53,7 @@ class OpsAgent:
             graph_runtime=settings.ops_graph_runtime,
             graph_checkpointer=settings.ops_graph_checkpointer,
             should_cancel=should_cancel,
+            remediation=remediation,
         )
 
     @classmethod

@@ -13,6 +13,10 @@ from app.agents.llm_ops_assistant import LLMOpsAssistant
 from app.agents.plan_execute import PlanExecuteReplan
 from app.agents.react_loop import ReactLoop
 from app.rag.access_control import KnowledgeAccessContext, system_access_context
+from app.remediation import (
+    PaymentApiRemediationController,
+    RemediationPlan,
+)
 from app.schemas import (
     AlertSeverity,
     ChatMode,
@@ -66,6 +70,8 @@ class OpsGraphState:
     fallback_report: DiagnosisReport | None = None
     report: DiagnosisReport | None = None
     human_review_requests: list[dict[str, Any]] = field(default_factory=list)
+    remediation_plan: RemediationPlan | None = None
+    remediation_result: ToolResult | None = None
     summary_metadata: dict[str, Any] = field(default_factory=dict)
     response: ChatResponse | None = None
     graph_trace: list[str] = field(default_factory=list)
@@ -99,6 +105,7 @@ class OpsGraphWorkflow:
         graph_checkpointer: str = "memory",
         checkpoint_store: SQLiteTaskStore | None = None,
         should_cancel: Callable[[str], bool] | None = None,
+        remediation: PaymentApiRemediationController | None = None,
     ) -> None:
         self.tool_registry = tool_registry
         self.knowledge_agent = knowledge_agent
@@ -113,6 +120,9 @@ class OpsGraphWorkflow:
         self.graph_checkpointer = graph_checkpointer
         self.checkpoint_store = checkpoint_store or SQLiteTaskStore.from_settings()
         self.should_cancel = should_cancel
+        self.remediation = (
+            remediation or PaymentApiRemediationController()
+        )
 
     async def run(
         self,
@@ -514,6 +524,16 @@ class OpsGraphWorkflow:
             "has_fallback_report": state.fallback_report is not None,
             "has_report": state.report is not None,
             "human_review_requests": _json_safe(state.human_review_requests),
+            "remediation_plan": (
+                _dump_model(state.remediation_plan)
+                if state.remediation_plan
+                else None
+            ),
+            "remediation_result": (
+                _dump_model(state.remediation_result)
+                if state.remediation_result
+                else None
+            ),
             "has_response": state.response is not None,
             "summary_metadata": _json_safe(state.summary_metadata),
             "graph_runtime": state.graph_runtime,
@@ -593,6 +613,14 @@ class OpsGraphWorkflow:
             fallback_report=_optional_model(snapshot.get("fallback_report"), DiagnosisReport),
             report=_optional_model(snapshot.get("report"), DiagnosisReport),
             human_review_requests=snapshot.get("human_review_requests") or [],
+            remediation_plan=_optional_model(
+                snapshot.get("remediation_plan"),
+                RemediationPlan,
+            ),
+            remediation_result=_optional_model(
+                snapshot.get("remediation_result"),
+                ToolResult,
+            ),
             summary_metadata=snapshot.get("summary_metadata") or {},
             response=_optional_model(snapshot.get("response"), ChatResponse),
             graph_runtime=snapshot.get("graph_runtime") or "local",
@@ -657,6 +685,10 @@ class OpsGraphWorkflow:
             ("summarize_report", self._summarize_report_node),
             ("build_response", self._build_response_node),
             ("human_review_gate", self._human_review_gate_node),
+            (
+                "execute_approved_remediation",
+                self._execute_approved_remediation_node,
+            ),
             ("persist_incident", self._persist_incident_node),
         ]
 
@@ -672,6 +704,19 @@ class OpsGraphWorkflow:
             service=self._service(state),
             fallback_tool_calls=self.react_loop.default_tool_calls(self._service(state)),
         )
+        if state.trigger_metadata.get("source") == "alertmanager":
+            state.selected_tool_calls = (
+                self._with_required_alert_evidence(
+                    state.selected_tool_calls,
+                    self._service(state),
+                )
+            )
+            state.tool_selection_metadata[
+                "required_alert_evidence"
+            ] = [
+                call.name
+                for call in state.selected_tool_calls
+            ]
 
     async def _execute_tools_node(self, state: OpsGraphState) -> None:
         state.react_steps = await self.react_loop.run(
@@ -684,6 +729,45 @@ class OpsGraphWorkflow:
             for step in state.react_steps
             if step.observation is not None
         ]
+
+    def _with_required_alert_evidence(
+        self,
+        selected: list[ToolCall],
+        service: str,
+    ) -> list[ToolCall]:
+        merged = list(selected)
+        selected_names = {call.name for call in merged}
+        required = [
+            ToolCall(
+                name="query_metrics",
+                arguments={
+                    "service": service,
+                    "window": "30m",
+                },
+            ),
+            ToolCall(
+                name="query_logs",
+                arguments={
+                    "service": service,
+                    "window": "30m",
+                },
+            ),
+            ToolCall(
+                name="query_recent_commits",
+                arguments={
+                    "service": service,
+                    "limit": 5,
+                },
+            ),
+        ]
+        for call in required:
+            if (
+                call.name not in selected_names
+                and self.tool_registry.get(call.name) is not None
+            ):
+                merged.append(call)
+                selected_names.add(call.name)
+        return merged
 
     async def _retrieve_runbook_node(self, state: OpsGraphState) -> None:
         state.knowledge_response = await self.knowledge_agent.answer(
@@ -800,7 +884,35 @@ class OpsGraphWorkflow:
             raise RuntimeError("Ops graph state has no response before human review gate.")
 
         review_plan = build_human_review_plan(self._report(state))
-        if not review_plan.required:
+        state.remediation_plan = self.remediation.plan(
+            service=self._service(state),
+            labels=state.alert_labels,
+            trigger_metadata=state.trigger_metadata,
+        )
+        proposed_actions = list(review_plan.proposed_actions)
+        risk_reasons = list(review_plan.risk_reasons)
+        if state.remediation_plan is not None:
+            proposed_actions.append(
+                state.remediation_plan.reason
+            )
+            risk_reasons.append(
+                state.remediation_plan.risk_reason
+            )
+
+        state.response.metadata["remediation"] = {
+            "planned": state.remediation_plan is not None,
+            "status": (
+                "waiting_review"
+                if state.remediation_plan is not None
+                else "not_planned"
+            ),
+            "plan": (
+                state.remediation_plan.model_dump(mode="json")
+                if state.remediation_plan
+                else None
+            ),
+        }
+        if not proposed_actions:
             state.response.metadata["human_review"] = {
                 "required": False,
                 "requests": [],
@@ -813,8 +925,8 @@ class OpsGraphWorkflow:
                 "required": True,
                 "status": "not_persisted",
                 "reason": "missing_task_id",
-                "proposed_actions": review_plan.proposed_actions,
-                "risk_reasons": review_plan.risk_reasons,
+                "proposed_actions": proposed_actions,
+                "risk_reasons": risk_reasons,
                 "requests": [],
             }
             return
@@ -822,8 +934,8 @@ class OpsGraphWorkflow:
         review, created = self._get_or_create_human_review_request(
             state=state,
             task_id=task_id,
-            proposed_actions=review_plan.proposed_actions,
-            risk_reasons=review_plan.risk_reasons,
+            proposed_actions=proposed_actions,
+            risk_reasons=risk_reasons,
         )
         reviews = self._human_reviews_for_current_run(state, task_id)
         if review.review_id not in {item.review_id for item in reviews}:
@@ -860,8 +972,8 @@ class OpsGraphWorkflow:
             "run_id": state.run_id,
             "review_ids": [item.review_id for item in reviews],
             "status": status.value,
-            "proposed_actions": review_plan.proposed_actions,
-            "risk_reasons": review_plan.risk_reasons,
+            "proposed_actions": proposed_actions,
+            "risk_reasons": risk_reasons,
         }
 
     def _get_or_create_human_review_request(
@@ -890,9 +1002,125 @@ class OpsGraphWorkflow:
                 "gate": "langgraph_interrupt"
                 if state.graph_runtime == "langgraph"
                 else "local_pause",
+                "remediation_plan": (
+                    state.remediation_plan.model_dump(mode="json")
+                    if state.remediation_plan
+                    else None
+                ),
             },
         )
         return review, True
+
+    async def _execute_approved_remediation_node(
+        self,
+        state: OpsGraphState,
+    ) -> None:
+        if state.response is None:
+            raise RuntimeError(
+                "Ops graph state has no response before remediation."
+            )
+
+        plan = state.remediation_plan
+        if plan is None:
+            return
+
+        task_id = self._task_id(state)
+        if not task_id:
+            state.response.metadata["remediation"].update(
+                {
+                    "status": "not_executed",
+                    "reason": "missing_task_id",
+                }
+            )
+            return
+
+        reviews = self._human_reviews_for_current_run(
+            state,
+            task_id,
+        )
+        if (
+            not reviews
+            or self._human_review_status(reviews)
+            != HumanReviewStatus.approved
+        ):
+            raise RuntimeError(
+                "Remediation execution requires approved human review."
+            )
+
+        approval = [
+            {
+                "review_id": review.review_id,
+                "reviewer": review.reviewer,
+                "reason": review.decision_reason,
+                "decided_at": (
+                    review.decided_at.isoformat()
+                    if review.decided_at
+                    else None
+                ),
+            }
+            for review in reviews
+        ]
+        self.checkpoint_store.append_event(
+            task_id=task_id,
+            event_type=(
+                DiagnosisTaskEventType.remediation_started
+            ),
+            message=(
+                "Approved payment-api remediation started."
+            ),
+            data={
+                "action": plan.action,
+                "service": plan.service,
+                "approval": approval,
+            },
+        )
+
+        result = await self.remediation.execute(plan)
+        result.data["approval"] = approval
+        state.remediation_result = result
+        state.response.metadata["remediation"] = {
+            "planned": True,
+            "status": (
+                "succeeded" if result.success else "failed"
+            ),
+            "plan": plan.model_dump(mode="json"),
+            "result": result.model_dump(mode="json"),
+        }
+        state.response.metadata.setdefault(
+            "tool_results",
+            [],
+        ).append(result.model_dump(mode="json"))
+
+        if result.success:
+            self.checkpoint_store.append_event(
+                task_id=task_id,
+                event_type=(
+                    DiagnosisTaskEventType.remediation_succeeded
+                ),
+                message=(
+                    "Approved payment-api remediation succeeded."
+                ),
+                data=result.model_dump(mode="json"),
+            )
+            state.response.answer = (
+                f"{state.response.answer}\n\n"
+                "Remediation:\n"
+                "- Approved payment-api fault reset succeeded."
+            )
+            return
+
+        self.checkpoint_store.append_event(
+            task_id=task_id,
+            event_type=(
+                DiagnosisTaskEventType.remediation_failed
+            ),
+            message="Approved payment-api remediation failed.",
+            data=result.model_dump(mode="json"),
+        )
+        raise RuntimeError(
+            "Approved remediation failed: "
+            f"{result.error or 'unknown error'}"
+        )
 
     def _human_reviews_for_current_run(
         self,

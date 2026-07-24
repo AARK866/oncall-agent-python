@@ -75,6 +75,17 @@ This token is checked before HMAC validation and is redacted from application
 logs. Production validation accepts either `WEBHOOK_SECRET` or
 `ALERTMANAGER_WEBHOOK_TOKEN`.
 
+## Approved payment remediation
+
+`PAYMENT_API_REMEDIATION_ENABLED` defaults to `false`. When enabled, production
+validation also requires `PAYMENT_API_BASE_URL` and
+`PAYMENT_API_FAULT_ADMIN_TOKEN`.
+
+The reset action is not registered in the LLM-visible diagnostic tool pool. It
+is executed only by the post-approval LangGraph node and only for allowlisted
+payment-api alerts. The administration token is redacted from application
+logs.
+
 ## Production Check
 
 Run:

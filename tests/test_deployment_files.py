@@ -50,6 +50,9 @@ def test_docker_compose_defines_api_and_optional_milvus_profile() -> None:
     assert "services/payment_api/Dockerfile" in compose
     assert "8010:8010" in compose
     assert "payment-traffic-generator:" in compose
+    assert "PAYMENT_API_REMEDIATION_ENABLED" in compose
+    assert "PAYMENT_API_BASE_URL" in compose
+    assert "PAYMENT_API_FAULT_ADMIN_TOKEN" in compose
 
     role_bootstrap = (
         ROOT / "docker" / "postgres" / "init-app-role.sh"
@@ -152,6 +155,8 @@ def test_kubernetes_base_supports_safe_multi_replica_deployment() -> None:
     assert "type: Recreate" in beat
     assert "OPS_GRAPH_CHECKPOINTER: postgres" in config
     assert "WORKFLOW_CHECKPOINTER: postgres" in config
+    assert "PAYMENT_API_REMEDIATION_ENABLED:" in config
+    assert "PAYMENT_API_BASE_URL:" in config
     assert "minReplicas: 2" in hpa
     assert "maxReplicas: 10" in hpa
     assert "minAvailable: 1" in pdb
@@ -171,4 +176,5 @@ def test_kubernetes_migration_and_secret_templates_are_safe() -> None:
     assert "REPLACE_WITH" in secret_example
     assert "sk-" not in secret_example
     assert "ghp_" not in secret_example
+    assert "PAYMENT_API_FAULT_ADMIN_TOKEN" in secret_example
     assert "deploy/kubernetes/secret.yaml" in gitignore

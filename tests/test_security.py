@@ -199,6 +199,32 @@ def test_production_config_requires_distributed_langgraph_state(
     assert "WORKFLOW_CHECKPOINTER=postgres" in result.detail
 
 
+def test_enabled_remediation_requires_payment_configuration(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(
+        settings,
+        "payment_api_remediation_enabled",
+        True,
+    )
+    monkeypatch.setattr(
+        settings,
+        "payment_api_base_url",
+        None,
+    )
+    monkeypatch.setattr(
+        settings,
+        "payment_api_fault_admin_token",
+        None,
+    )
+
+    result = asyncio.run(_check_config())
+
+    assert "PAYMENT_API_BASE_URL" in result.detail
+    assert "PAYMENT_API_FAULT_ADMIN_TOKEN" in result.detail
+
+
 def test_redact_text_hides_security_secrets(monkeypatch) -> None:
     monkeypatch.setattr(settings, "api_token", "api-secret")
     monkeypatch.setattr(settings, "webhook_secret", "webhook-secret")
@@ -207,12 +233,18 @@ def test_redact_text_hides_security_secrets(monkeypatch) -> None:
         "alertmanager_webhook_token",
         "alertmanager-secret",
     )
+    monkeypatch.setattr(
+        settings,
+        "payment_api_fault_admin_token",
+        "payment-remediation-secret",
+    )
 
     assert (
         redact_text(
-            "api-secret webhook-secret alertmanager-secret"
+            "api-secret webhook-secret alertmanager-secret "
+            "payment-remediation-secret"
         )
-        == "*** *** ***"
+        == "*** *** *** ***"
     )
 
 

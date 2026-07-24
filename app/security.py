@@ -303,6 +303,11 @@ def validate_production_security() -> list[str]:
         missing.append("PROMETHEUS_BASE_URL")
     if not settings.loki_base_url:
         missing.append("LOKI_BASE_URL")
+    if settings.payment_api_remediation_enabled:
+        if not settings.payment_api_base_url:
+            missing.append("PAYMENT_API_BASE_URL")
+        if not settings.payment_api_fault_admin_token:
+            missing.append("PAYMENT_API_FAULT_ADMIN_TOKEN")
     if not settings.github_repo:
         missing.append("GITHUB_REPO")
     if not settings.audit_enabled:
@@ -495,6 +500,7 @@ def _configured_secrets() -> list[str]:
             settings.github_proxy_url,
             settings.gitlab_token,
             settings.milvus_token,
+            settings.payment_api_fault_admin_token,
         ]
         if secret
     ]

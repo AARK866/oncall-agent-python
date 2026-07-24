@@ -67,6 +67,9 @@ services:
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434/v1}
       PROMETHEUS_BASE_URL: ${PROMETHEUS_BASE_URL:-http://host.docker.internal:9090}
       LOKI_BASE_URL: ${LOKI_BASE_URL:-http://host.docker.internal:3100}
+      PAYMENT_API_REMEDIATION_ENABLED: ${PAYMENT_API_REMEDIATION_ENABLED:-false}
+      PAYMENT_API_BASE_URL: ${PAYMENT_API_BASE_URL:-http://payment-api:8010}
+      PAYMENT_API_FAULT_ADMIN_TOKEN: ${PAYMENT_API_FAULT_ADMIN_TOKEN:-}
     ports:
       - "8000:8000"
     volumes:
@@ -126,6 +129,9 @@ services:
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434/v1}
       PROMETHEUS_BASE_URL: ${PROMETHEUS_BASE_URL:-http://host.docker.internal:9090}
       LOKI_BASE_URL: ${LOKI_BASE_URL:-http://host.docker.internal:3100}
+      PAYMENT_API_REMEDIATION_ENABLED: ${PAYMENT_API_REMEDIATION_ENABLED:-false}
+      PAYMENT_API_BASE_URL: ${PAYMENT_API_BASE_URL:-http://payment-api:8010}
+      PAYMENT_API_FAULT_ADMIN_TOKEN: ${PAYMENT_API_FAULT_ADMIN_TOKEN:-}
     command:
       - python
       - -m

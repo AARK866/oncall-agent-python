@@ -126,6 +126,31 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "github_allowed_paths", "")
     monkeypatch.setattr(settings, "github_max_file_bytes", 2_000_000)
     monkeypatch.setattr(settings, "github_max_patch_chars", 4000)
+    monkeypatch.setattr(
+        settings,
+        "payment_api_remediation_enabled",
+        False,
+    )
+    monkeypatch.setattr(
+        settings,
+        "payment_api_base_url",
+        None,
+    )
+    monkeypatch.setattr(
+        settings,
+        "payment_api_fault_admin_token",
+        None,
+    )
+    monkeypatch.setattr(
+        settings,
+        "payment_api_timeout_seconds",
+        10,
+    )
+    monkeypatch.setattr(
+        settings,
+        "payment_api_verify_ssl",
+        True,
+    )
     monkeypatch.setattr(settings, "ops_http_max_connections", 20)
     monkeypatch.setattr(
         settings,

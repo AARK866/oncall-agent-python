@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     github_allowed_paths: str = ""
     github_max_file_bytes: int = 2_000_000
     github_max_patch_chars: int = 4000
+    payment_api_remediation_enabled: bool = False
+    payment_api_base_url: str | None = None
+    payment_api_fault_admin_token: str | None = None
+    payment_api_timeout_seconds: int = 10
+    payment_api_verify_ssl: bool = True
     ops_http_max_connections: int = 20
     ops_http_max_keepalive_connections: int = 10
     knowledge_engine: str = "local"

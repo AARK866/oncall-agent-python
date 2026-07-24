@@ -31,6 +31,8 @@ data:
   LOKI_BASE_URL: http://loki.monitoring.svc.cluster.local:3100
   GITHUB_REPO: your-org/oncall-agent-python
   GITHUB_BRANCH: main
+  PAYMENT_API_REMEDIATION_ENABLED: "false"
+  PAYMENT_API_BASE_URL: http://payment-api.default.svc.cluster.local:8010
   METRICS_ENABLED: "true"
   AUDIT_ENABLED: "true"
   AUDIT_PERSIST_ENABLED: "true"
