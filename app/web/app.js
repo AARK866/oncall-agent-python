@@ -142,12 +142,14 @@ async function request(path, options = {}) {
   const response = await fetch(`${base}${path}`, { ...options, headers });
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
-    try {
-      const payload = await response.json();
-      detail = formatErrorDetail(payload.detail ?? payload);
-    } catch {
-      const text = await response.text();
-      if (text) detail = text;
+    const rawBody = await response.text();
+    if (rawBody) {
+      try {
+        const payload = JSON.parse(rawBody);
+        detail = formatErrorDetail(payload.detail ?? payload);
+      } catch {
+        detail = rawBody;
+      }
     }
     const error = new Error(detail);
     error.status = response.status;

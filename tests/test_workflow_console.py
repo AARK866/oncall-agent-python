@@ -19,6 +19,8 @@ def test_workflow_console_and_assets_are_served() -> None:
     assert "--green:" in styles.text
     assert script.status_code == 200
     assert "openRunDetail" in script.text
+    assert "const rawBody = await response.text();" in script.text
+    assert "const payload = JSON.parse(rawBody);" in script.text
     assert mark.status_code == 200
     assert "<svg" in mark.text
 
