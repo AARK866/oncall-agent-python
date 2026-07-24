@@ -46,6 +46,10 @@ def test_docker_compose_defines_api_and_optional_milvus_profile() -> None:
     assert "POSTGRES_APP_USER" in compose
     assert "POSTGRES_APP_PASSWORD" in compose
     assert "init-app-role.sh" in compose
+    assert "payment-api:" in compose
+    assert "services/payment_api/Dockerfile" in compose
+    assert "8010:8010" in compose
+    assert "payment-traffic-generator:" in compose
 
     role_bootstrap = (
         ROOT / "docker" / "postgres" / "init-app-role.sh"
@@ -96,6 +100,7 @@ def test_observability_deployment_files_define_scrape_alerts_and_dashboard() -> 
     ).read_text(encoding="utf-8")
 
     assert "host.docker.internal:8000" in local_prometheus
+    assert "host.docker.internal:8010" in local_prometheus
     assert "service: oncall-agent" in local_prometheus
     assert "schema: v13" in local_loki
     assert "oncall-prometheus" in local_compose

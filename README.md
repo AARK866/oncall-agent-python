@@ -1,5 +1,10 @@
 # OnCall Agent Python
 
+The monitored payment business service is documented in
+[`docs/payment-api.md`](docs/payment-api.md). It runs on port `8010` and
+provides real HTTP traffic, Prometheus metrics, JSON logs, and controlled
+fault injection for incident drills.
+
 A learning-oriented OnCall Agent backend built with Python and FastAPI.
 
 Useful commands:

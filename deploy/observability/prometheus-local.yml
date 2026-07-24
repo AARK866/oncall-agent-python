@@ -14,3 +14,11 @@ scrape_configs:
         labels:
           service: oncall-agent
           environment: local
+
+  - job_name: payment-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - host.docker.internal:8010
+        labels:
+          environment: local
