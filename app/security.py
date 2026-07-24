@@ -268,6 +268,14 @@ def validate_production_security() -> list[str]:
         missing.append("TASK_QUEUE_MODE=celery")
     if not settings.redis_url:
         missing.append("REDIS_URL")
+    if settings.ops_tool_mode.strip().lower() != "real":
+        missing.append("OPS_TOOL_MODE=real")
+    if not settings.prometheus_base_url:
+        missing.append("PROMETHEUS_BASE_URL")
+    if not settings.loki_base_url:
+        missing.append("LOKI_BASE_URL")
+    if not settings.github_repo:
+        missing.append("GITHUB_REPO")
     return sorted(set(missing))
 
 
@@ -440,9 +448,14 @@ def _configured_secrets() -> list[str]:
             settings.webhook_secret,
             settings.database_url,
             settings.redis_url,
+            settings.prometheus_bearer_token,
+            settings.prometheus_password,
+            settings.loki_bearer_token,
+            settings.loki_password,
             settings.llm_api_key,
             settings.embedding_api_key,
             settings.github_token,
+            settings.github_proxy_url,
             settings.gitlab_token,
             settings.milvus_token,
         ]

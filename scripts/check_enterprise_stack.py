@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
 
-import httpx
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -16,7 +14,7 @@ from app.llm import create_llm_client
 from app.rag import KnowledgeBase, create_embedding_model
 from app.schemas import ChatMessage, MessageRole
 from app.security import redact_text, validate_production_security
-from app.tools import GitHubClient
+from app.tools import GitHubClient, LokiClient, PrometheusClient
 
 ACTIVE_TIMEOUT_SECONDS = 10
 
@@ -213,28 +211,44 @@ async def _check_prometheus() -> CheckResult:
     if not settings.prometheus_base_url:
         return CheckResult("prometheus", "SKIP", "PROMETHEUS_BASE_URL is empty")
 
-    base_url = settings.prometheus_base_url.rstrip("/")
-    async with httpx.AsyncClient(timeout=_active_timeout(settings.prometheus_timeout_seconds)) as client:
-        response = await client.get(f"{base_url}/api/v1/query", params={"query": "up"})
-        response.raise_for_status()
-        data = response.json()
-
-    status = data.get("status")
-    if status != "success":
-        return CheckResult("prometheus", "FAIL", f"unexpected status: {status}")
-    return CheckResult("prometheus", "PASS", f"{base_url} query API is reachable")
+    client = PrometheusClient(
+        timeout_seconds=int(
+            _active_timeout(settings.prometheus_timeout_seconds)
+        )
+    )
+    await client.query("up")
+    return CheckResult(
+        "prometheus",
+        "PASS",
+        f"{client.base_url} query API is reachable",
+    )
 
 
 async def _check_loki() -> CheckResult:
     if not settings.loki_base_url:
         return CheckResult("loki", "SKIP", "LOKI_BASE_URL is empty")
 
-    base_url = settings.loki_base_url.rstrip("/")
-    async with httpx.AsyncClient(timeout=_active_timeout(settings.loki_timeout_seconds)) as client:
-        response = await client.get(f"{base_url}/ready")
-        response.raise_for_status()
-
-    return CheckResult("loki", "PASS", f"{base_url} readiness endpoint is reachable")
+    client = LokiClient(
+        timeout_seconds=int(
+            _active_timeout(settings.loki_timeout_seconds)
+        )
+    )
+    if not await client.ready():
+        return CheckResult(
+            "loki",
+            "FAIL",
+            "Loki readiness endpoint returned an unexpected body",
+        )
+    await client.query_range(
+        query='{service="payment-api"}',
+        limit=1,
+        window_seconds=300,
+    )
+    return CheckResult(
+        "loki",
+        "PASS",
+        f"{client.base_url} readiness and query APIs are reachable",
+    )
 
 
 async def _check_github() -> CheckResult:

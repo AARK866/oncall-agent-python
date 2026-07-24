@@ -6,7 +6,11 @@ from app.tools.factory import create_ops_tool_registry
 def get_ops_tool_health(mode: str | None = None) -> OpsToolHealthResponse:
     registry = create_ops_tool_registry(mode)
     backends = _backends_for_mode(registry.mode)
-    ready = all(backend.configured for backend in backends)
+    ready = all(
+        backend.configured
+        for backend in backends
+        if backend.required
+    )
 
     return OpsToolHealthResponse(
         mode=registry.mode,
@@ -34,11 +38,26 @@ def _backends_for_mode(mode: str) -> list[ToolBackendStatus]:
             _backend(
                 name="prometheus",
                 required_settings=["PROMETHEUS_BASE_URL"],
-                values={"PROMETHEUS_BASE_URL": settings.prometheus_base_url},
+                optional_settings=[
+                    "PROMETHEUS_BEARER_TOKEN",
+                    "PROMETHEUS_USERNAME",
+                    "PROMETHEUS_PASSWORD",
+                    "PROMETHEUS_VERIFY_SSL",
+                ],
+                values={
+                    "PROMETHEUS_BASE_URL": settings.prometheus_base_url,
+                },
             ),
             _backend(
                 name="loki",
                 required_settings=["LOKI_BASE_URL"],
+                optional_settings=[
+                    "LOKI_BEARER_TOKEN",
+                    "LOKI_USERNAME",
+                    "LOKI_PASSWORD",
+                    "LOKI_ORG_ID",
+                    "LOKI_VERIFY_SSL",
+                ],
                 values={"LOKI_BASE_URL": settings.loki_base_url},
             ),
             _backend(
@@ -50,21 +69,29 @@ def _backends_for_mode(mode: str) -> list[ToolBackendStatus]:
                     "GITLAB_PROJECT_ID": settings.gitlab_project_id,
                     "GITLAB_TOKEN": settings.gitlab_token,
                 },
+                required=False,
             ),
             _backend(
                 name="github",
                 required_settings=["GITHUB_REPO"],
-                optional_settings=["GITHUB_TOKEN", "GITHUB_BRANCH", "GITHUB_BASE_URL"],
+                optional_settings=[
+                    "GITHUB_TOKEN",
+                    "GITHUB_BRANCH",
+                    "GITHUB_BASE_URL",
+                    "GITHUB_PROXY_URL",
+                ],
                 values={
                     "GITHUB_REPO": settings.github_repo,
                     "GITHUB_TOKEN": settings.github_token,
                     "GITHUB_BRANCH": settings.github_branch,
                     "GITHUB_BASE_URL": settings.github_base_url,
+                    "GITHUB_PROXY_URL": settings.github_proxy_url,
                 },
             ),
             ToolBackendStatus(
                 name="topology",
                 configured=True,
+                required=False,
                 notes="Topology currently uses a placeholder until CMDB/Kubernetes/service graph is connected.",
             ),
         ]
@@ -83,6 +110,7 @@ def _backend(
     required_settings: list[str],
     values: dict[str, str | None],
     optional_settings: list[str] | None = None,
+    required: bool = True,
 ) -> ToolBackendStatus:
     missing = [
         setting_name
@@ -92,6 +120,7 @@ def _backend(
     return ToolBackendStatus(
         name=name,
         configured=not missing,
+        required=required,
         required_settings=required_settings,
         optional_settings=optional_settings or [],
         missing_settings=missing,

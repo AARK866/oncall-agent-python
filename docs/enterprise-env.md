@@ -93,6 +93,11 @@ GITHUB_TOKEN=your_github_token
 GITHUB_REPO=AARK866/oncall-agent-python
 GITHUB_BRANCH=main
 GITHUB_TIMEOUT_SECONDS=10
+GITHUB_VERIFY_SSL=true
+GITHUB_PROXY_URL=http://127.0.0.1:7897
+GITHUB_ALLOWED_PATHS=app,docs
+GITHUB_MAX_FILE_BYTES=2000000
+GITHUB_MAX_PATCH_CHARS=4000
 ```
 
 Used by:
@@ -102,6 +107,28 @@ Used by:
 - `read_repository_file`
 - Ops diagnosis in real tool mode
 
+## 5. Real Prometheus And Loki
+
+```env
+OPS_TOOL_MODE=real
+PROMETHEUS_BASE_URL=http://127.0.0.1:9090
+PROMETHEUS_BEARER_TOKEN=
+PROMETHEUS_USERNAME=
+PROMETHEUS_PASSWORD=
+PROMETHEUS_VERIFY_SSL=true
+
+LOKI_BASE_URL=http://127.0.0.1:3100
+LOKI_BEARER_TOKEN=
+LOKI_USERNAME=
+LOKI_PASSWORD=
+LOKI_ORG_ID=
+LOKI_VERIFY_SSL=true
+```
+
+Bearer token and Basic authentication are both supported. Use
+`LOKI_ORG_ID` for multi-tenant Loki. Production validation rejects mock tool
+mode and requires Prometheus, Loki, and GitHub configuration.
+
 ## Recommended Switch Order
 
 1. Fill `LLM_API_KEY`, set `LLM_PROVIDER=langchain-openai`, run `python scripts/check_llm_client.py`.
@@ -109,7 +136,8 @@ Used by:
 3. Start Milvus, fill `MILVUS_URI`.
 4. Set `KNOWLEDGE_RETRIEVER_MODE=hybrid` and `KNOWLEDGE_VECTOR_STORE=milvus`.
 5. Fill `GITHUB_TOKEN` and `GITHUB_REPO`.
-6. Run the API and test `/api/knowledge/search`.
+6. Configure Prometheus and Loki, then set `OPS_TOOL_MODE=real`.
+7. Run the API and test `/api/knowledge/search`.
 
 ## Stack Check
 

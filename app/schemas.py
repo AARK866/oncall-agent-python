@@ -662,6 +662,7 @@ class ToolResult(BaseModel):
 class ToolBackendStatus(BaseModel):
     name: str
     configured: bool
+    required: bool = True
     required_settings: list[str] = Field(default_factory=list)
     optional_settings: list[str] = Field(default_factory=list)
     missing_settings: list[str] = Field(default_factory=list)

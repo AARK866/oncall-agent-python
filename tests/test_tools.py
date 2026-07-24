@@ -2,17 +2,22 @@ import asyncio
 import base64
 
 import httpx
+import pytest
 
+from app.config import settings
 from app.schemas import ToolCall
 from app.tools import (
     GitHubClient,
+    LokiClient,
+    PrometheusClient,
     ToolRegistry,
     create_mock_ops_registry,
     create_ops_connector,
     create_ops_tool_registry,
     get_ops_tool_health,
 )
-from app.tools.real_ops_tools import create_real_ops_tools
+from app.tools.real_ops_clients import ConnectorResponseError
+from app.tools.real_ops_tools import RealOpsToolset, create_real_ops_tools
 
 
 def test_mock_ops_registry_executes_metrics_tool() -> None:
@@ -183,3 +188,195 @@ def test_github_client_reads_repository_file() -> None:
     assert data["content"] == "print('hello')"
     assert data["content_base64"] == encoded
     assert data["path"] == "app/main.py"
+
+
+def test_prometheus_client_sends_auth_and_validates_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/query"
+        assert request.url.params["query"] == "up"
+        assert request.headers["Authorization"] == "Bearer metrics-token"
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": {"resultType": "vector", "result": []},
+            },
+        )
+
+    client = PrometheusClient(
+        base_url="https://prometheus.test",
+        bearer_token="metrics-token",
+        transport=httpx.MockTransport(handler),
+    )
+
+    data = asyncio.run(client.query("up"))
+
+    assert data["status"] == "success"
+    assert data["data"]["result"] == []
+
+
+def test_prometheus_client_rejects_failed_query_envelope() -> None:
+    client = PrometheusClient(
+        base_url="https://prometheus.test",
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    "status": "error",
+                    "errorType": "bad_data",
+                    "error": "invalid query",
+                },
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ConnectorResponseError,
+        match="invalid query",
+    ):
+        asyncio.run(client.query("broken"))
+
+
+def test_loki_client_bounds_query_and_sends_tenant_header() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/loki/api/v1/query_range"
+        assert request.headers["X-Scope-OrgID"] == "tenant-blue"
+        assert request.headers["Authorization"] == "Bearer logs-token"
+        assert request.url.params["direction"] == "backward"
+        assert request.url.params["limit"] == "500"
+        assert int(request.url.params["end"]) > int(
+            request.url.params["start"]
+        )
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": {"resultType": "streams", "result": []},
+            },
+        )
+
+    client = LokiClient(
+        base_url="https://loki.test",
+        bearer_token="logs-token",
+        org_id="tenant-blue",
+        transport=httpx.MockTransport(handler),
+    )
+
+    data = asyncio.run(
+        client.query_range(
+            '{service="payment-api"}',
+            limit=9999,
+            window_seconds=3600,
+        )
+    )
+
+    assert data["status"] == "success"
+
+
+def test_real_tool_rejects_promql_label_injection() -> None:
+    toolset = RealOpsToolset()
+
+    with pytest.raises(ValueError, match="service must contain"):
+        asyncio.run(
+            toolset.query_metrics(
+                {"service": 'payment-api"} or up{job="secret'}
+            )
+        )
+
+
+def test_github_client_rejects_path_traversal() -> None:
+    client = GitHubClient(
+        base_url="https://api.github.test",
+        repo="acme/service",
+        branch="main",
+    )
+
+    with pytest.raises(ValueError, match="Unsafe GitHub"):
+        asyncio.run(client.get_file("../secret.txt"))
+
+
+def test_github_client_enforces_file_size_limit() -> None:
+    client = GitHubClient(
+        base_url="https://api.github.test",
+        repo="acme/service",
+        branch="main",
+        max_file_bytes=10,
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    "type": "file",
+                    "path": "large.log",
+                    "size": 100,
+                    "encoding": "base64",
+                    "content": "",
+                },
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="GITHUB_MAX_FILE_BYTES",
+    ):
+        asyncio.run(client.get_file("large.log"))
+
+
+def test_deployment_tool_falls_back_to_github() -> None:
+    class MissingGitLab:
+        configured = False
+
+    class FakeGitHub:
+        async def list_deployments(self, environment=None, limit=10):
+            assert environment == "production"
+            assert limit == 10
+            return {
+                "deployments": [
+                    {
+                        "version": "main",
+                        "deployed_at": "2026-07-24T00:00:00Z",
+                    }
+                ]
+            }
+
+    toolset = RealOpsToolset(
+        gitlab=MissingGitLab(),
+        github=FakeGitHub(),
+    )
+
+    result = asyncio.run(
+        toolset.query_deployments(
+            {
+                "service": "payment-api",
+                "environment": "production",
+            }
+        )
+    )
+
+    assert result["provider"] == "github"
+    assert result["deployments"][0]["version"] == "main"
+
+
+def test_real_health_treats_gitlab_as_optional(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "prometheus_base_url",
+        "https://prometheus.test",
+    )
+    monkeypatch.setattr(
+        settings,
+        "loki_base_url",
+        "https://loki.test",
+    )
+    monkeypatch.setattr(settings, "github_repo", "acme/service")
+
+    health = get_ops_tool_health(mode="real")
+
+    assert health.ready is True
+    gitlab = next(
+        backend
+        for backend in health.backends
+        if backend.name == "gitlab"
+    )
+    assert gitlab.required is False
+    assert gitlab.configured is False

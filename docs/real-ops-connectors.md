@@ -8,10 +8,10 @@ The project now has a real connector layer for future production systems:
 - GitHub: repository files and commits
 - Topology: placeholder for CMDB, Kubernetes, or service graph
 
-Default mode is still mock:
+Local tests default to mock. Production validation requires real mode:
 
 ```env
-OPS_TOOL_MODE=mock
+OPS_TOOL_MODE=real
 ```
 
 ## Switch To Real Mode
@@ -21,15 +21,45 @@ Edit `.env`:
 ```env
 OPS_TOOL_MODE=real
 PROMETHEUS_BASE_URL=http://localhost:9090
+PROMETHEUS_BEARER_TOKEN=
+PROMETHEUS_USERNAME=
+PROMETHEUS_PASSWORD=
+PROMETHEUS_VERIFY_SSL=true
+
 LOKI_BASE_URL=http://localhost:3100
+LOKI_BEARER_TOKEN=
+LOKI_USERNAME=
+LOKI_PASSWORD=
+LOKI_ORG_ID=
+LOKI_VERIFY_SSL=true
+
 GITLAB_BASE_URL=https://gitlab.example.com
 GITLAB_TOKEN=replace-with-token
 GITLAB_PROJECT_ID=123
+
 GITHUB_BASE_URL=https://api.github.com
 GITHUB_TOKEN=replace-with-token
 GITHUB_REPO=AARK866/oncall-agent-python
 GITHUB_BRANCH=main
+GITHUB_VERIFY_SSL=true
+GITHUB_PROXY_URL=http://127.0.0.1:7897
+GITHUB_ALLOWED_PATHS=app,docs
+GITHUB_MAX_FILE_BYTES=2000000
+GITHUB_MAX_PATCH_CHARS=4000
+
+OPS_HTTP_MAX_CONNECTIONS=20
+OPS_HTTP_MAX_KEEPALIVE_CONNECTIONS=10
 ```
+
+Prometheus and Loki support either bearer-token authentication or HTTP Basic
+authentication. `LOKI_ORG_ID` becomes the `X-Scope-OrgID` header used by
+multi-tenant Loki deployments. Leave `GITHUB_ALLOWED_PATHS` empty to permit the
+whole configured repository, or set comma-separated path prefixes.
+
+The Agent never receives a free-form PromQL or LogQL execution tool. It supplies
+a validated service name and a bounded `1m` to `24h` time window; the Harness
+builds controlled query templates. Log result limits, GitHub paths, file sizes,
+commit patches, refs, and SHAs are also bounded before network execution.
 
 Then start the API:
 
@@ -103,8 +133,21 @@ $env:HTTPS_PROXY='http://127.0.0.1:7897'
 | --- | --- |
 | `query_metrics` | Prometheus `/api/v1/query` |
 | `query_logs` | Loki `/loki/api/v1/query_range` |
-| `query_deployments` | GitLab `/api/v4/projects/{project_id}/deployments` |
+| `query_deployments` | GitLab when configured, otherwise GitHub Deployments |
 | `query_recent_commits` | GitHub `/repos/{owner}/{repo}/commits` |
 | `query_commit_detail` | GitHub `/repos/{owner}/{repo}/commits/{sha}` |
 | `read_repository_file` | GitHub `/repos/{owner}/{repo}/contents/{path}` |
 | `query_service_topology` | Placeholder for CMDB/Kubernetes/service graph |
+
+## Acceptance
+
+The enterprise checker uses the same authenticated clients as the Agent:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_enterprise_stack.py `
+  --skip-llm --skip-embedding --skip-milvus
+```
+
+It executes a safe `up` query against Prometheus, checks Loki readiness plus a
+bounded log query with the configured auth headers, and reads the latest GitHub
+commit. Secrets are redacted from failures.

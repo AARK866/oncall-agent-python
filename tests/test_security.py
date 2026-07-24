@@ -87,6 +87,22 @@ def test_production_config_reports_missing_security_settings(monkeypatch) -> Non
     assert "WEBHOOK_SECRET" in result.detail
 
 
+def test_production_config_rejects_mock_ops_backends(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "ops_tool_mode", "mock")
+    monkeypatch.setattr(settings, "prometheus_base_url", None)
+    monkeypatch.setattr(settings, "loki_base_url", None)
+    monkeypatch.setattr(settings, "github_repo", None)
+
+    result = asyncio.run(_check_config())
+
+    assert result.status == "FAIL"
+    assert "OPS_TOOL_MODE=real" in result.detail
+    assert "PROMETHEUS_BASE_URL" in result.detail
+    assert "LOKI_BASE_URL" in result.detail
+    assert "GITHUB_REPO" in result.detail
+
+
 def test_redact_text_hides_security_secrets(monkeypatch) -> None:
     monkeypatch.setattr(settings, "api_token", "api-secret")
     monkeypatch.setattr(settings, "webhook_secret", "webhook-secret")

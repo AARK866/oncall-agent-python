@@ -1,7 +1,11 @@
+import re
 from typing import Any
 
 from app.tools.base import SimpleTool
 from app.tools.real_ops_clients import GitHubClient, GitLabClient, LokiClient, PrometheusClient
+
+_SERVICE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_WINDOW_PATTERN = re.compile(r"^([1-9][0-9]*)(s|m|h)$")
 
 
 class RealOpsToolset:
@@ -65,49 +69,83 @@ class RealOpsToolset:
 
     async def query_metrics(self, arguments: dict[str, Any]) -> dict[str, Any]:
         service = _normalize_service(arguments.get("service"))
-        five_xx_query = f'sum(rate(http_requests_total{{service="{service}",status=~"5.."}}[5m]))'
+        window, _ = _normalize_window(arguments.get("window"))
+        five_xx_query = (
+            "sum(rate(http_requests_total"
+            f'{{service="{service}",status=~"5.."}}[{window}]))'
+        )
         p95_query = (
             "histogram_quantile(0.95, "
-            f'sum(rate(http_request_duration_seconds_bucket{{service="{service}"}}[5m])) by (le))'
+            "sum(rate(http_request_duration_seconds_bucket"
+            f'{{service="{service}"}}[{window}])) by (le))'
+        )
+        results = await self.prometheus.query_many(
+            {
+                "http_5xx_rate": five_xx_query,
+                "p95_latency": p95_query,
+            }
         )
         return {
             "service": service,
             "provider": "prometheus",
+            "window": window,
             "queries": {
                 "http_5xx_rate": five_xx_query,
                 "p95_latency": p95_query,
             },
-            "http_5xx_rate": await self.prometheus.query(five_xx_query),
-            "p95_latency": await self.prometheus.query(p95_query),
+            "http_5xx_rate": results["http_5xx_rate"],
+            "p95_latency": results["p95_latency"],
             "summary": f"Queried Prometheus metrics for {service}.",
         }
 
     async def query_logs(self, arguments: dict[str, Any]) -> dict[str, Any]:
         service = _normalize_service(arguments.get("service"))
-        limit = int(arguments.get("limit") or 50)
+        window, window_seconds = _normalize_window(
+            arguments.get("window")
+        )
+        limit = _bounded_int(arguments.get("limit"), 50, 1, 500)
         query = f'{{service="{service}"}} |= "ERROR"'
         return {
             "service": service,
             "provider": "loki",
+            "window": window,
             "query": query,
-            "logs": await self.loki.query_range(query=query, limit=limit),
+            "logs": await self.loki.query_range(
+                query=query,
+                limit=limit,
+                window_seconds=window_seconds,
+            ),
             "summary": f"Queried Loki logs for {service}.",
         }
 
     async def query_deployments(self, arguments: dict[str, Any]) -> dict[str, Any]:
         service = _normalize_service(arguments.get("service"))
         environment = arguments.get("environment")
-        limit = int(arguments.get("limit") or 10)
+        limit = _bounded_int(arguments.get("limit"), 10, 1, 100)
+        if self.gitlab.configured:
+            provider = "gitlab"
+            result = await self.gitlab.list_deployments(
+                environment=environment,
+                limit=limit,
+            )
+        else:
+            provider = "github"
+            result = await self.github.list_deployments(
+                environment=environment,
+                limit=limit,
+            )
         return {
             "service": service,
-            "provider": "gitlab",
-            **await self.gitlab.list_deployments(environment=environment, limit=limit),
-            "summary": f"Queried GitLab deployments for {service}.",
+            "provider": provider,
+            **result,
+            "summary": (
+                f"Queried {provider.title()} deployments for {service}."
+            ),
         }
 
     async def query_recent_commits(self, arguments: dict[str, Any]) -> dict[str, Any]:
         service = _normalize_service(arguments.get("service"))
-        limit = int(arguments.get("limit") or 10)
+        limit = _bounded_int(arguments.get("limit"), 10, 1, 100)
         path = arguments.get("path")
         since = arguments.get("since")
         return {
@@ -131,7 +169,12 @@ class RealOpsToolset:
         path = str(arguments.get("path") or "").strip()
         if not path:
             raise ValueError("path is required for read_repository_file.")
-        max_chars = int(arguments.get("max_chars") or 4000)
+        max_chars = _bounded_int(
+            arguments.get("max_chars"),
+            4000,
+            1,
+            50_000,
+        )
         result = await self.github.get_file(path=path, ref=arguments.get("ref"))
         content = result.get("content")
         if isinstance(content, str) and len(content) > max_chars:
@@ -176,8 +219,46 @@ def create_real_ops_tools(
 
 def _normalize_service(service: Any) -> str:
     if not service:
-        return "payment-api"
-    return str(service).strip()
+        raise ValueError("service is required.")
+    normalized = str(service).strip()
+    if not _SERVICE_PATTERN.fullmatch(normalized):
+        raise ValueError(
+            "service must contain only letters, digits, dots, "
+            "underscores, and hyphens."
+        )
+    return normalized
+
+
+def _normalize_window(value: Any) -> tuple[str, int]:
+    normalized = str(value or "30m").strip().lower()
+    match = _WINDOW_PATTERN.fullmatch(normalized)
+    if not match:
+        raise ValueError(
+            "window must use a duration such as 5m, 30m, or 1h."
+        )
+    amount = int(match.group(1))
+    multiplier = {
+        "s": 1,
+        "m": 60,
+        "h": 3600,
+    }[match.group(2)]
+    seconds = amount * multiplier
+    if seconds < 60 or seconds > 86_400:
+        raise ValueError("window must be between 1 minute and 24 hours.")
+    return normalized, seconds
+
+
+def _bounded_int(
+    value: Any,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    try:
+        parsed = int(value if value is not None else default)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("limit must be an integer.") from exc
+    return max(minimum, min(parsed, maximum))
 
 
 def _service_schema() -> dict[str, Any]:
@@ -197,8 +278,12 @@ def _service_window_schema() -> dict[str, Any]:
     schema = _service_schema()
     schema["properties"]["window"] = {
         "type": "string",
-        "description": "Time window, for example 30m or 1h. Real query templates currently use recent data.",
+        "description": "Bounded time window from 1m to 24h, for example 30m or 1h.",
         "default": "30m",
+    }
+    schema["properties"]["limit"] = {
+        "type": "integer",
+        "description": "Maximum records to fetch. The connector enforces a backend-specific cap.",
     }
     return schema
 
