@@ -1,6 +1,7 @@
 import re
 from typing import Any
 
+from app.config import settings
 from app.tools.base import SimpleTool
 from app.tools.real_ops_clients import GitHubClient, GitLabClient, LokiClient, PrometheusClient
 
@@ -70,14 +71,9 @@ class RealOpsToolset:
     async def query_metrics(self, arguments: dict[str, Any]) -> dict[str, Any]:
         service = _normalize_service(arguments.get("service"))
         window, _ = _normalize_window(arguments.get("window"))
-        five_xx_query = (
-            "sum(rate(http_requests_total"
-            f'{{service="{service}",status=~"5.."}}[{window}]))'
-        )
-        p95_query = (
-            "histogram_quantile(0.95, "
-            "sum(rate(http_request_duration_seconds_bucket"
-            f'{{service="{service}"}}[{window}])) by (le))'
+        five_xx_query, p95_query = _metric_queries(
+            service=service,
+            window=window,
         )
         results = await self.prometheus.query_many(
             {
@@ -215,6 +211,24 @@ def create_real_ops_tools(
         gitlab=gitlab,
         github=github,
     ).tools()
+
+
+def _metric_queries(service: str, window: str) -> tuple[str, str]:
+    if service == settings.telemetry_service_name:
+        return (
+            "sum(rate(oncall_http_requests_total"
+            f'{{service="{service}",status_class="5xx"}}[{window}]))',
+            "histogram_quantile(0.95, "
+            "sum(rate(oncall_http_request_duration_seconds_bucket"
+            f'{{service="{service}"}}[{window}])) by (le))',
+        )
+    return (
+        "sum(rate(http_requests_total"
+        f'{{service="{service}",status=~"5.."}}[{window}]))',
+        "histogram_quantile(0.95, "
+        "sum(rate(http_request_duration_seconds_bucket"
+        f'{{service="{service}"}}[{window}])) by (le))',
+    )
 
 
 def _normalize_service(service: Any) -> str:

@@ -284,6 +284,47 @@ def test_real_tool_rejects_promql_label_injection() -> None:
         )
 
 
+def test_real_metrics_tool_uses_oncall_metric_schema_for_itself(
+    monkeypatch,
+) -> None:
+    class RecordingPrometheus:
+        queries = {}
+
+        async def query_many(self, queries):
+            self.queries = queries
+            return {
+                name: {
+                    "status": "success",
+                    "data": {"resultType": "vector", "result": []},
+                }
+                for name in queries
+            }
+
+    prometheus = RecordingPrometheus()
+    monkeypatch.setattr(
+        settings,
+        "telemetry_service_name",
+        "oncall-agent",
+    )
+    toolset = RealOpsToolset(prometheus=prometheus)
+
+    asyncio.run(
+        toolset.query_metrics(
+            {"service": "oncall-agent", "window": "5m"}
+        )
+    )
+
+    assert "oncall_http_requests_total" in (
+        prometheus.queries["http_5xx_rate"]
+    )
+    assert 'status_class="5xx"' in (
+        prometheus.queries["http_5xx_rate"]
+    )
+    assert "oncall_http_request_duration_seconds_bucket" in (
+        prometheus.queries["p95_latency"]
+    )
+
+
 def test_github_client_rejects_path_traversal() -> None:
     client = GitHubClient(
         base_url="https://api.github.test",

@@ -85,6 +85,22 @@ def test_observability_deployment_files_define_scrape_alerts_and_dashboard() -> 
     assert dashboard["uid"] == "oncall-agent-ops"
     assert dashboard["title"] == "OnCall Agent Operations"
 
+    local_prometheus = (
+        ROOT / "deploy" / "observability" / "prometheus-local.yml"
+    ).read_text(encoding="utf-8")
+    local_loki = (
+        ROOT / "deploy" / "observability" / "loki-local.yml"
+    ).read_text(encoding="utf-8")
+    local_compose = (
+        ROOT / "deploy" / "observability" / "docker-compose.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "host.docker.internal:8000" in local_prometheus
+    assert "service: oncall-agent" in local_prometheus
+    assert "schema: v13" in local_loki
+    assert "oncall-prometheus" in local_compose
+    assert "oncall-loki" in local_compose
+
 
 def test_kubernetes_base_supports_safe_multi_replica_deployment() -> None:
     base = ROOT / "deploy" / "kubernetes" / "base"

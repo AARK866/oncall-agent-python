@@ -29,6 +29,41 @@ AUDIT_CLEANUP_INTERVAL_SECONDS=86400
 Production validation requires persistent auditing. When metrics are enabled in
 production, `METRICS_AUTH_TOKEN` is mandatory.
 
+## Local Real Prometheus And Loki
+
+The local stack scrapes a FastAPI process running on port `8000`. The
+application writes JSON logs to a rotating file, and the lightweight shipper
+pushes those records to Loki.
+
+Set these values in the terminal that starts Uvicorn:
+
+```powershell
+$env:OPS_TOOL_MODE = "real"
+$env:PROMETHEUS_BASE_URL = "http://localhost:9090"
+$env:LOKI_BASE_URL = "http://localhost:3100"
+$env:LOG_FILE_PATH = "app/data/oncall-agent.log"
+$env:TELEMETRY_SERVICE_NAME = "oncall-agent"
+```
+
+Start the infrastructure:
+
+```powershell
+docker compose -f deploy/observability/docker-compose.yml up -d
+```
+
+Start Uvicorn, then start the log shipper in another terminal:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\ship_logs_to_loki.py `
+  --log-file app/data/oncall-agent.log `
+  --follow
+```
+
+Prometheus attaches `service="oncall-agent"` to scraped metrics. The shipper
+uses the structured log `service`, `level`, and `logger` fields as Loki
+labels. Production Kubernetes deployments should continue to collect stdout
+with a platform collector instead of running this local shipper.
+
 ## Trace And Logs
 
 The API accepts either W3C `traceparent` or a safe `X-Trace-ID`. Invalid or

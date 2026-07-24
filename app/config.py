@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     log_level: str = "INFO"
     log_format: str = "json"
+    log_file_path: str | None = None
+    log_file_max_bytes: int = 10_485_760
+    log_file_backup_count: int = 5
+    telemetry_service_name: str = "oncall-agent"
     metrics_enabled: bool = True
     metrics_auth_token: str | None = None
     audit_enabled: bool = True

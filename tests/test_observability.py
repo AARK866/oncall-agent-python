@@ -7,9 +7,13 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.main import app
 from app.observability.audit import AuditStore
-from app.observability.logging import JsonLogFormatter
+from app.observability.logging import (
+    JsonLogFormatter,
+    configure_logging,
+)
 from app.schemas import ToolCall
 from app.tools import create_mock_ops_registry
+from scripts.ship_logs_to_loki import build_loki_streams
 
 
 client = TestClient(app)
@@ -148,4 +152,34 @@ def test_json_logs_include_trace_context_and_redact_secrets(
 
     assert payload["message"] == "token=***"
     assert payload["event"] == "test.event"
+    assert payload["service"] == "oncall-agent"
     assert "tenant_id" in payload
+
+
+def test_json_file_logging_and_loki_stream_conversion(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    log_path = tmp_path / "oncall-agent.log"
+    monkeypatch.setattr(settings, "log_file_path", str(log_path))
+    configure_logging()
+    try:
+        logging.getLogger("file-log-test").warning(
+            "payment-api synthetic warning"
+        )
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+        streams = build_loki_streams(
+            lines,
+            default_service="oncall-agent",
+        )
+
+        assert lines
+        assert streams[0]["stream"]["service"] == "oncall-agent"
+        assert streams[0]["stream"]["level"] == "WARNING"
+        assert "payment-api synthetic warning" in streams[0]["values"][0][1]
+    finally:
+        monkeypatch.setattr(settings, "log_file_path", None)
+        configure_logging()

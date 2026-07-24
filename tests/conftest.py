@@ -8,6 +8,14 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "app_env", "local")
     monkeypatch.setattr(settings, "log_level", "INFO")
     monkeypatch.setattr(settings, "log_format", "json")
+    monkeypatch.setattr(settings, "log_file_path", None)
+    monkeypatch.setattr(settings, "log_file_max_bytes", 10_485_760)
+    monkeypatch.setattr(settings, "log_file_backup_count", 5)
+    monkeypatch.setattr(
+        settings,
+        "telemetry_service_name",
+        "oncall-agent",
+    )
     monkeypatch.setattr(settings, "metrics_enabled", True)
     monkeypatch.setattr(settings, "metrics_auth_token", None)
     monkeypatch.setattr(settings, "audit_enabled", True)
