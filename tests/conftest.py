@@ -159,4 +159,5 @@ def use_local_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(settings, "diagnosis_task_timeout_seconds", 900)
     monkeypatch.setattr(settings, "diagnosis_task_recovery_limit", 50)
+    monkeypatch.setattr(settings, "ops_graph_runtime", "local")
     monkeypatch.setattr(settings, "ops_graph_checkpointer", "memory")

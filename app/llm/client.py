@@ -251,7 +251,12 @@ class LangChainLLMClient:
         if tools:
             model = model.bind_tools(tools)
 
-        structured_model = model.with_structured_output(schema)
+        # OpenAI-compatible providers such as DeepSeek may reject the
+        # response_format used by LangChain's default json_schema mode.
+        structured_model = model.with_structured_output(
+            schema,
+            method="function_calling",
+        )
         result = await structured_model.ainvoke(self._messages_to_langchain(messages))
         if isinstance(result, schema):
             return result

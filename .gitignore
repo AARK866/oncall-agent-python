@@ -22,9 +22,11 @@ htmlcov/
 *.db
 *.db-*
 *.sqlite
+*.sqlite-*
 *.sqlite3
 app/data/*.log
 app/data/*.log.*
+app/data/runtime/
 
 dist/
 build/

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
 
+from pydantic import BaseModel
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -24,6 +26,10 @@ class CheckResult:
     name: str
     status: str
     detail: str
+
+
+class LLMHealthResponse(BaseModel):
+    answer: str
 
 
 async def main() -> int:
@@ -139,12 +145,25 @@ async def _check_llm() -> CheckResult:
     _tune_client_for_health_check(client)
     messages = [
         ChatMessage(role=MessageRole.system, content="You are a concise enterprise stack checker."),
-        ChatMessage(role=MessageRole.user, content="Reply with one short sentence."),
+        ChatMessage(
+            role=MessageRole.user,
+            content='Return JSON only: {"answer": "one short sentence"}.',
+        ),
     ]
-    answer = await client.generate(messages)
-    if not answer.strip():
+    response = await client.generate_json(
+        messages,
+        schema=LLMHealthResponse,
+    )
+    if not response.answer.strip():
         return CheckResult("llm", "FAIL", "provider returned an empty response")
-    return CheckResult("llm", "PASS", f"{settings.llm_model} returned: {answer.strip()[:120]}")
+    return CheckResult(
+        "llm",
+        "PASS",
+        (
+            f"{settings.llm_model} structured output returned: "
+            f"{response.answer.strip()[:120]}"
+        ),
+    )
 
 
 async def _check_embedding() -> CheckResult:

@@ -81,3 +81,6 @@ For non-interactive CI acceptance only:
   --auto-approve `
   --reviewer release-gate
 ```
+
+The fully automatic Prometheus-rule acceptance is documented in
+`docs/full-payment-incident-drill.md`.

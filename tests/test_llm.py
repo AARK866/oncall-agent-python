@@ -82,3 +82,41 @@ def test_langchain_llm_message_conversion() -> None:
         ("system", "system"),
         ("human", "hello"),
     ]
+
+
+def test_langchain_structured_output_uses_function_calling() -> None:
+    calls = {}
+
+    class StructuredModel:
+        async def ainvoke(self, messages):
+            calls["messages"] = messages
+            return ExampleStructuredOutput(answer="ok")
+
+    class ChatModel:
+        def with_structured_output(self, schema, *, method):
+            calls["schema"] = schema
+            calls["method"] = method
+            return StructuredModel()
+
+    client = LangChainLLMClient(
+        api_key="test-key",
+        model="test-model",
+    )
+    client._model = ChatModel()
+
+    result = asyncio.run(
+        client.generate_json(
+            messages=[
+                ChatMessage(
+                    role=MessageRole.user,
+                    content="hello",
+                )
+            ],
+            schema=ExampleStructuredOutput,
+        )
+    )
+
+    assert result.answer == "ok"
+    assert calls["schema"] is ExampleStructuredOutput
+    assert calls["method"] == "function_calling"
+    assert calls["messages"] == [("human", "hello")]
